@@ -20,6 +20,21 @@ function check(name: string, cond: boolean, detail?: string) {
 
 const ORIGINAL_FETCH = globalThis.fetch;
 
+/**
+ * Direct RSS feed URLs matching `scraper.ts` `directFeedUrls`.
+ * Used by stubFetch to recognize the new direct-feed URLs.
+ */
+const DIRECT_FEED_URLS: Record<string, string> = {
+  "bbc.com": "https://feeds.bbci.co.uk/news/rss.xml",
+  "reuters.com": "https://www.reuters.com/rss/?service=rss",
+  "cnn.com": "https://rss.cnn.com/rss/edition.rss",
+  "npr.org": "https://npr.org/rss/rss.xml",
+  "aljazeera.com": "https://www.aljazeera.com/rss",
+  "theguardian.com": "https://www.theguardian.com/rss",
+  "apnews.com": "https://apnews.com/hub/rss/ap-top-news",
+  "thehill.com": "https://thehill.com/rss",
+};
+
 function feedXml(items: string): string {
   return `<rss version="2.0"><channel><title>Google News</title><link>https://news.google.com</link><description>d</description>${items}</channel></rss>`;
 }
@@ -44,13 +59,17 @@ function stubFetch(
   opts: { status?: number; contentType?: string } = {}
 ): void {
   const site = sources.find((s) => s.label === label)?.site ?? "";
+  const directUrl = DIRECT_FEED_URLS[site] ?? "";
   (globalThis as any).fetch = (url: string) => {
     if (opts.status && opts.status !== 200) {
       return new Response("nope", { status: opts.status });
     }
-    // The `site:` filter is URL-encoded inside the query string.
     const decoded = decodeURIComponent(url);
-    const body = decoded.includes(`site:${site}`) ? xml : feedXml("");
+    const matched = directUrl && decoded.includes(directUrl);
+    const body = matched ? xml : feedXml("");
+    if (!matched) {
+      console.log(`  [stub] no match for ${decoded.substring(0, 80)}... (expected ${directUrl})`);
+    }
     return new Response(body, {
       headers: { "content-type": opts.contentType ?? "text/xml; charset=UTF-8" },
     });
@@ -64,6 +83,7 @@ function stubFetchAll(
   (globalThis as any).fetch = handler;
 }
 
+/** Reset fetch to the original implementation. */
 function restoreFetch(): void {
   (globalThis as any).fetch = ORIGINAL_FETCH;
 }
