@@ -6,8 +6,6 @@ import { useClusters } from "./hooks/useClusters";
 import type { CategoryId, Cluster } from "./types";
 import { CATEGORY_META, CATEGORY_ORDER, categoryMeta } from "./types";
 
-
-
 function CategoryFilter({
   active,
   counts,
@@ -103,7 +101,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-
       <ErrorBoundary>
         <header className="border-b-4 border-ink bg-ink">
           <div className="max-w-6xl mx-auto px-4 py-8">
@@ -118,8 +115,10 @@ export default function App() {
                   the difference.
                 </p>
               </div>
+            </div>
           </div>
         </header>
+      </ErrorBoundary>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
         <CategoryFilter active={filter} counts={counts} onChange={updateFilter} />
@@ -222,7 +221,6 @@ export default function App() {
       </footer>
 
       {selected && <StoryModal cluster={selected} onClose={closeModal} />}
-      </ErrorBoundary>
     </div>
   );
 }
