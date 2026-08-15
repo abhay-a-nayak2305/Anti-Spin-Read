@@ -22,7 +22,7 @@
     {
       "binding": "DB",
       "database_name": "anti-spin-read",
-      "database_id": "REPLACE_WITH_ID_FROM_wrangler_d1_create",
+      "database_id": "4d1d3b1e-e5cc-451c-980a-0d87087fe85c",
       "migrations_dir": "migrations"
     }
   ],
