@@ -1,0 +1,43 @@
+{
+  "name": "anti-spin-read-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend for The Anti-Spin Read - cross-source news framing comparison (Cloudflare Worker + D1)",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
+    "test": "tsx scripts/test-cluster.ts && tsx scripts/test-framing.ts && tsx scripts/test-categorize.ts && tsx scripts/test-images.ts && tsx scripts/test-scraper.ts && tsx scripts/test-db-d1.ts && tsx scripts/test-pipeline.ts && tsx scripts/test-api.ts",
+    "test:images": "tsx scripts/test-images.ts",
+    "test:d1": "tsx scripts/test-db-d1.ts",
+    "test:pipeline": "tsx scripts/test-pipeline.ts",
+    "test:api": "tsx scripts/test-api.ts",
+    "test:e2e": "tsx scripts/e2e.ts",
+    "eval:framing": "tsx scripts/eval-framing.ts",
+    "seed:ui": "tsx scripts/launch-seeded-ui.ts",
+    "migrate:local": "wrangler d1 migrations apply anti-spin-read --local",
+    "migrate:remote": "wrangler d1 migrations apply anti-spin-read --remote",
+    "build:frontend": "npm --prefix ../frontend run build",
+    "deploy": "npm run build:frontend && wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "^4.6.14",
+    "rss-parser": "^3.13.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260811.1",
+    "@hono/node-server": "^1.13.7",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.10.5",
+    "better-sqlite3": "^13.0.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "esbuild@0.28.2": true,
+    "workerd@1.20260811.1": true
+  }
+}

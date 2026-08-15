@@ -1,0 +1,177 @@
+@import url("https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #0a0a0a; /* page background */
+  --color-paper: #fafafa; /* slabs/cards */
+  --color-acid: #e8ff00; /* primary accent */
+  --color-alarm: #ff2e2e; /* omissions / errors */
+  /* category colors */
+  --color-cat-politics: #e8ff00;
+  --color-cat-world: #00d4ff;
+  --color-cat-business: #ff8a00;
+  --color-cat-tech: #ff2ec4;
+  --color-cat-science: #2eff4e;
+  --color-cat-crime: #ff2e2e;
+  --color-cat-culture: #b44dff;
+  --font-display: "Archivo Black", "Arial Black", system-ui, sans-serif;
+  --font-mono: "Space Mono", "Courier New", ui-monospace, monospace;
+}
+
+/*
+ * Custom classes live in @layer components (NOT unlayered) so Tailwind
+ * utilities — e.g. bg-cat-crime, shadow-[8px_8px_0_var(--color-cat-*)] —
+ * can override them. Unlayered CSS would beat every utility.
+ */
+@layer base {
+  html {
+    /* Hide the scrollbar entirely; scrolling still works. */
+    scrollbar-width: none; /* Firefox */
+  }
+
+  html::-webkit-scrollbar {
+    display: none; /* Chrome/Safari */
+  }
+
+  body {
+    background: var(--color-ink);
+    color: var(--color-paper);
+    font-family: var(--font-mono);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--color-acid);
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--color-acid);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* ------- marquee ticker ------- */
+  .marquee-track {
+    display: flex;
+    width: max-content;
+    animation: marquee 22s linear infinite;
+  }
+
+  .marquee:hover .marquee-track {
+    animation-play-state: paused;
+  }
+
+  /* ------- brutalist blocks ------- */
+  .slab {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    border: 3px solid var(--color-ink);
+    box-shadow: 8px 8px 0 var(--color-acid);
+  }
+
+  .slab--flat {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    border: 3px solid var(--color-ink);
+  }
+
+  /* stamp badge, rotated */
+  .stamp {
+    display: inline-block;
+    border: 2px solid var(--color-ink);
+    background: var(--color-acid);
+    color: var(--color-ink);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+  }
+
+  .stamp--alarm {
+    background: var(--color-alarm);
+    color: var(--color-paper);
+  }
+
+  .stamp--pending {
+    background: var(--color-paper);
+    border-style: dashed;
+    color: var(--color-ink);
+  }
+
+  /* diagonal-stripe placeholder for missing images */
+  .no-img {
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--color-acid),
+      var(--color-acid) 12px,
+      var(--color-ink) 12px,
+      var(--color-ink) 24px
+    );
+    display: grid;
+    place-items: center;
+    color: var(--color-ink);
+    font-family: var(--font-display);
+  }
+
+  /* ------- modal ------- */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(10, 10, 10, 0.82);
+    backdrop-filter: blur(4px);
+    display: grid;
+    place-items: center;
+    padding: 24px 16px;
+    overflow-y: auto;
+  }
+
+  .modal-panel {
+    width: 100%;
+    max-width: 44rem;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    animation: modal-pop 0.18s ease-out;
+    /* hide the scrollbar; the panel still scrolls */
+    scrollbar-width: none;
+  }
+
+  .modal-panel::-webkit-scrollbar {
+    display: none;
+  }
+
+  body.modal-open {
+    overflow: hidden;
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes modal-pop {
+  from {
+    transform: translateY(16px) scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+/* ------- reduced motion ------- */
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track,
+  .modal-panel {
+    animation: none;
+  }
+}

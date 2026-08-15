@@ -1,0 +1,10 @@
+# Local dev secrets for `wrangler dev` — copy to .dev.vars (gitignored).
+# The same values go to production via `npx wrangler secret put`.
+
+# Gemini API key from https://aistudio.google.com/apikey (free tier)
+GEMINI_API_KEY=your-key-here
+
+# Shared secret that protects POST /api/cron — generate a long random string.
+# The worker is FAIL-CLOSED: with CRON_SECRET unset, /api/cron returns 503
+# (no default secret), so production MUST set this via `wrangler secret put`.
+CRON_SECRET=dev-secret-change-me

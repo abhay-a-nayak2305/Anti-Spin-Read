@@ -1,0 +1,17 @@
+node_modules
+dist
+.env
+*.local
+.DS_Store
+*.log
+
+# Cloudflare Workers / D1
+.wrangler
+.wrangler-tmp
+.dev.vars
+
+# Playwright / browser test artifacts
+.playwright-mcp/
+ui_screenshot.png
+frontend/tests/ui_screenshot.png
+test-results/

@@ -1,0 +1,47 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "anti-spin-read",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  // rss-parser (xml2js) pulls in Node builtins (events, timers)
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Serve the built React SPA from the same Worker as the API.
+  // The Worker handles every request (run_worker_first) and falls back to
+  // ASSETS.fetch() for anything that isn't /api/*.
+  "assets": {
+    "directory": "../frontend/dist",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+
+  // D1 database (SQLite). Create it once per Cloudflare account:
+  //   npx wrangler d1 create anti-spin-read
+  // then paste the returned database_id below.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "anti-spin-read",
+      "database_id": "REPLACE_WITH_ID_FROM_wrangler_d1_create",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Pipeline runs automatically every 15 minutes — no GitHub Actions needed.
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+
+  // Non-secret config. Secrets (GEMINI_API_KEY, CRON_SECRET) go through:
+  //   npx wrangler secret put GEMINI_API_KEY
+  //   npx wrangler secret put CRON_SECRET
+  "vars": {
+    "GEMINI_MODEL": "gemini-2.0-flash",
+    "CLUSTER_WINDOW_HOURS": "48",
+    // Comma-separated CORS allowlist; default (unset) = local dev origins.
+    // Production serves the SPA and API same-origin, so this rarely matters.
+    "ALLOWED_ORIGINS": "",
+    // Max manual POST /api/cron triggers per IP per 10 minutes (default 5)
+    "CRON_RATE_LIMIT": "5"
+  }
+}
