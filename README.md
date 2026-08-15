@@ -32,6 +32,16 @@ Google News RSS (8 outlets)
 - `backend/` — Cloudflare Worker (Hono + TypeScript): scraper, clustering, Gemini framing, D1 data layer, wrangler config, D1 migrations
 - `frontend/` — React + Vite + Tailwind single-page app, built into the Worker's static assets
 
+## Docs
+
+- `docs/architecture.md` — high-level architecture: pipeline, read API, D1 data model, read/write separation
+- `docs/api.md` — full API contract (request/response shapes, errors, headers, CORS)
+- `docs/adr/0001-worker-monolith.md` — why one Worker serves API + SPA
+- `docs/adr/0002-d1-sqlite.md` — why D1 is the store, and the retention/purge design
+- `docs/adr/0003-structured-gemini-output.md` — why Gemini framing is schema-constrained JSON with a validation gate
+- `AGENTS.md` — commands, migration workflow, security and architecture rules for coding agents
+- `CHANGELOG.md` — release history (1.0.0: the hardening pass)
+
 ## Key design decisions
 
 **Clustering (no paid API).** Headlines are tokenized (stopwords stripped); same-source near-duplicates are coalesced; stories match when their token sets share *rare* tokens. Composite score = Jaccard × (1 + 2 × rare-share), threshold 0.45. Clusters must span 2+ different outlets — same-outlet duplicates are deduped away, cross-outlet comparisons are the product.
