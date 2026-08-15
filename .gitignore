@@ -14,4 +14,5 @@ dist
 .playwright-mcp/
 ui_screenshot.png
 frontend/tests/ui_screenshot.png
+modal.png
 test-results/
