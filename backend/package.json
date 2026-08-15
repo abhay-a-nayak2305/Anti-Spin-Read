@@ -32,7 +32,7 @@
     "@types/node": "^22.10.5",
     "better-sqlite3": "^13.0.3",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3",
+    "typescript": "^7.0.2",
     "wrangler": "^4.0.0"
   },
   "allowScripts": {
