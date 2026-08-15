@@ -63,7 +63,7 @@ function CategoryFilter({
 }
 
 export default function App() {
-  const { data, loading, error, refreshing, hasMore, loadingMore, refresh, loadMore } =
+  const { data, loading, error, hasMore, loadingMore, loadMore } =
     useClusters();
   const clusters = useMemo(() => data?.clusters ?? [], [data]);
   const framed = useMemo(() => clusters.filter((c) => c.framing), [clusters]);
