@@ -63,6 +63,19 @@ function stripHtml(html: string): string {
   return out.replace(/\s+/g, " ").trim();
 }
 
+/** Direct RSS feed URLs for each outlet (official, public RSS endpoints).
+ *  These bypass Google News entirely and work from any Cloudflare Worker IP. */
+const directFeedUrls: Record<string, string> = {
+  bbc: 'https://feeds.bbci.co.uk/news/rss.xml',
+  reuters: 'https://www.reuters.com/rss/?service=rss',
+  cnn: 'https://rss.cnn.com/rss/edition.rss',
+  npr: 'https://npr.org/rss/rss.xml',
+  aljazeera: 'https://www.aljazeera.com/rss',
+  guardian: 'https://www.theguardian.com/rss',
+  ap: 'https://apnews.com/hub/rss/ap-top-news',
+  thehill: 'https://thehill.com/rss',
+};
+
 /**
  * Outlet-name variants that Google News appends to titles ("Headline - BBC")
  * and ledes ("... text AP News"). The label itself is always included;
@@ -177,7 +190,21 @@ async function scrapeSource(
   site: string,
   windowHours: number
 ): Promise<RawArticle[]> {
-  const xml = await fetchFeedXml(googleNewsFeedUrl(site, windowHours));
+  // 1️⃣ Try direct RSS feed first (bypasses Google News IP block)
+  const directUrl = directFeedUrls[site as keyof typeof directFeedUrls];
+  let xml: string = "";
+  if (directUrl) {
+    console.log(`[scraper] fetching direct RSS for ${label} from ${directUrl}`);
+    xml = await fetchFeedXml(directUrl);
+  }
+
+  // 2️⃣ If direct feed returned empty, fall back to Google News
+  if (!xml || xml.length === 0) {
+    console.log(`[scraper] direct feed empty for ${label}, falling back to Google News`);
+    const googleUrl = googleNewsFeedUrl(site, windowHours);
+    xml = await fetchFeedXml(googleUrl);
+  }
+
   if (!xml) return [];
   const feed = await parser.parseString(xml);
 
