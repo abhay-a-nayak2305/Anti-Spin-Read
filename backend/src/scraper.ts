@@ -64,16 +64,17 @@ function stripHtml(html: string): string {
 }
 
 /** Direct RSS feed URLs for each outlet (official, public RSS endpoints).
- *  These bypass Google News entirely and work from any Cloudflare Worker IP. */
+ *  These bypass Google News entirely and work from any Cloudflare Worker IP.
+ *  Keys match the `site` values in `config.ts` (e.g. "bbc.com", "reuters.com"). */
 const directFeedUrls: Record<string, string> = {
-  bbc: 'https://feeds.bbci.co.uk/news/rss.xml',
-  reuters: 'https://www.reuters.com/rss/?service=rss',
-  cnn: 'https://rss.cnn.com/rss/edition.rss',
-  npr: 'https://npr.org/rss/rss.xml',
-  aljazeera: 'https://www.aljazeera.com/rss',
-  guardian: 'https://www.theguardian.com/rss',
-  ap: 'https://apnews.com/hub/rss/ap-top-news',
-  thehill: 'https://thehill.com/rss',
+  "bbc.com": "https://feeds.bbci.co.uk/news/rss.xml",
+  "reuters.com": "https://www.reuters.com/rss/?service=rss",
+  "cnn.com": "https://rss.cnn.com/rss/edition.rss",
+  "npr.org": "https://npr.org/rss/rss.xml",
+  "aljazeera.com": "https://www.aljazeera.com/rss",
+  "theguardian.com": "https://www.theguardian.com/rss",
+  "apnews.com": "https://apnews.com/hub/rss/ap-top-news",
+  "thehill.com": "https://thehill.com/rss",
 };
 
 /**

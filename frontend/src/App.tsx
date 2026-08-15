@@ -6,33 +6,7 @@ import { useClusters } from "./hooks/useClusters";
 import type { CategoryId, Cluster } from "./types";
 import { CATEGORY_META, CATEGORY_ORDER, categoryMeta } from "./types";
 
-const TICKER_ITEMS = [
-  "THE ANTI-SPIN READ",
-  "LIVE",
-  "FRAMING ANALYSIS",
-  "8 OUTLETS WATCHED",
-  "UPDATED EVERY 15 MIN",
-  "READ THE DIFFERENCE",
-];
 
-function Ticker() {
-  const text = TICKER_ITEMS.map((t) => `★ ${t}`).join("  ");
-  return (
-    <>
-      <div
-        className="marquee overflow-hidden border-b-4 border-ink bg-acid text-ink"
-        aria-hidden
-      >
-        <div className="marquee-track py-1 font-display text-sm tracking-wide whitespace-nowrap">
-          <span>{text}</span>
-          <span>{text}</span>
-        </div>
-      </div>
-      {/* Static line for screen readers — the marquee itself is aria-hidden. */}
-      <span className="sr-only">{TICKER_ITEMS.join(" · ")}</span>
-    </>
-  );
-}
 
 function CategoryFilter({
   active,
@@ -129,12 +103,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-      <Ticker />
 
       <ErrorBoundary>
         <header className="border-b-4 border-ink bg-ink">
           <div className="max-w-6xl mx-auto px-4 py-8">
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
               <div>
                 <h1 className="font-display text-4xl sm:text-5xl uppercase leading-none tracking-tight">
                   The Anti-Spin{" "}
@@ -145,15 +118,6 @@ export default function App() {
                   the difference.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={refresh}
-                disabled={refreshing}
-                className="shrink-0 slab px-4 py-2 font-display text-sm uppercase tracking-wide transition-transform hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-1 active:translate-y-1 disabled:opacity-50"
-              >
-                {refreshing ? "Refreshing…" : "Refresh"}
-              </button>
-            </div>
           </div>
         </header>
 
