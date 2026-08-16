@@ -9,6 +9,11 @@ import type { ClusteredArticle } from "./cluster.js";
 
 const FRAMING_CONCURRENCY = 3;
 const RETRY_BATCH = 50;
+// Workers free plan caps outbound requests at 50 per invocation. One run
+// spends ~18 on RSS, so enrichment and framing must share the remaining
+// ~32: ENRICH_BATCH × 1 + FRAMING_BATCH × 2 (primary + fallback) ≤ 32.
+const ENRICH_BATCH = 15;
+const FRAMING_BATCH = 8;
 const RETENTION_DAYS = 14;
 const RUNS_RETENTION_DAYS = 90; // pipeline_runs log is bound separately
 const MAINTENANCE_INTERVAL_MS = 24 * 3600_000;
@@ -143,8 +148,11 @@ export async function runPipeline(
     const clusters = clusterArticles(poolArticles, { clusterWindow: 128 });
 
     // 2b. Enrich new-cluster articles with og:image URLs (best-effort,
-    // only articles without an image yet; failures retry next run)
-    const toEnrich = [...new Set(clusters.flat())];
+    // only articles without an image yet; failures retry next run).
+    // Capped at ENRICH_BATCH per run: a pool burst can surface 40+ clusters
+    // at once, and each og:image fetch is a subrequest against the 50-per-
+    // invocation budget. Uncapped articles are retried next run.
+    const toEnrich = [...new Set(clusters.flat())].slice(0, ENRICH_BATCH);
     const enriched = await enrich(db, toEnrich);
 
     // 3. Collect clusters that still need framing: new ones first (create
@@ -175,9 +183,13 @@ export async function runPipeline(
     }
 
     // 4. Frame with bounded concurrency; a failure only marks that cluster.
+    //    FRAMING_BATCH caps clusters per run (new first) so the burst
+    //    doesn't exhaust the subrequest budget; the rest stay in the retry
+    //    queue and get framed over the next runs.
     let framed = 0;
     let failed = 0;
-    await pool(pending, FRAMING_CONCURRENCY, async (p) => {
+    const framingQueue = pending.slice(0, FRAMING_BATCH);
+    await pool(framingQueue, FRAMING_CONCURRENCY, async (p) => {
       try {
         const framing = await frame(p.cluster, {
           apiKey: cfg.geminiApiKey,

@@ -246,6 +246,53 @@ console.log("== test: late-arriving second outlet clusters via the pool ==");
   check("still exactly one cluster", db.clusters.length === 1);
 }
 
+console.log("\n== test: framing batch cap (subrequest budget) ==");
+{
+  const db = new MemoryDb();
+  const recent = new Date();
+  // 12 distinct stories (no shared tokens), 2 outlets each -> 12 clusters in ONE run (pool burst).
+  const stories = [
+    "krill farming dispute",
+    "tunnel collapse probe",
+    "vaccine trial halted",
+    "monsoon floods north",
+    "airport strike chaos",
+    "peace talks resume",
+    "chip export ban",
+    "wildfire smoke warning",
+    "dockworkers wage deal",
+    "satellite launch failure",
+    "bank merger approved",
+    "heatwave power cuts",
+  ];
+  const scrapeAll = async () =>
+    stories.flatMap((s, i) => [
+      { ...article(`a${i}`, `${s} escalates`, "bbc"), publishedAt: recent },
+      { ...article(`b${i}`, `${s}: what we know`, "cnn"), publishedAt: recent },
+    ]);
+  const deps = {
+    scrape: scrapeAll,
+    frame: async () => framing("capped story"),
+    enrich: async () => 0,
+  };
+
+  const r1 = await runPipeline(env, db, deps);
+  check("run 1: 12 clusters found", r1.clusters === 12, JSON.stringify(r1));
+  check(
+    "run 1: only 8 framed (FRAMING_BATCH)",
+    r1.framed === 8 && r1.failed === 0,
+    JSON.stringify(r1)
+  );
+
+  const unframed = await db.clustersNeedingFraming(50);
+  check("4 clusters left in the retry queue", unframed.length === 4, String(unframed.length));
+
+  // Next run (no new material) frames the rest.
+  const r2 = await runPipeline(env, db, { ...deps, scrape: async () => [] });
+  check("run 2: remaining 4 framed", r2.framed === 4 && r2.failed === 0, JSON.stringify(r2));
+  check("retry queue empty", (await db.clustersNeedingFraming(50)).length === 0);
+}
+
 console.log("\n=====================");
 console.log(`RESULTS: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
