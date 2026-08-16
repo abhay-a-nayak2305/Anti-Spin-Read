@@ -170,7 +170,12 @@ async function fetchFeedXml(url: string): Promise<string> {
         Accept: "application/rss+xml, application/xml, text/xml, */*",
       },
       cf: { cacheTtl: 300 },
+      // Every redirect hop counts as a subrequest against the 50-per-
+      // invocation budget, so don't follow chains: a 3xx counts as an empty
+      // feed and the caller falls back to the Google News URL (1 hop).
+      redirect: "manual",
     });
+    if (res.status >= 300 && res.status < 400) return ""; // redirect → fallback
     if (!res.ok) throw new Error(`feed HTTP ${res.status}`);
     const contentType = res.headers.get("content-type") ?? "";
     if (contentType.toLowerCase().includes("text/html")) {
