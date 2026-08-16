@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stories stuck invisible — clustering only saw same-run articles.** Each
+  15-minute run clustered just its ~10–15 new articles, but direct RSS feeds
+  only surface each outlet's latest items, so the second outlet covering a
+  story typically arrived in a *later* run and never matched. Result: 660
+  unclustered articles sat in the window while the page showed the same 7
+  stories for hours. The pipeline now clusters new articles **against the
+  recent unclustered pool** (48h window, `recentUnclusteredArticles`, with a
+  wider 128-cluster temporal window to reach stories published hours apart).
+  Once formed, a cluster's articles leave the pool, so nothing re-creates.
 - **Unbounded pipeline run log** — `pipeline_runs` kept one row per 15-min
   run forever (~35k rows/year). The daily retention purge now also drops
   run-log rows older than 90 days (`RUNS_RETENTION_DAYS`), so every table

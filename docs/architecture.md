@@ -30,7 +30,7 @@ Everything runs on Cloudflare's free tier:
 │    1. scrape: direct outlet RSS, 18 outlets (scraper.ts)              │
 │        · 15s timeout · content-type/4MB caps · suffix stripping     │
 │    2. dedup + insert: articles (dedup_key PK, INSERT OR IGNORE)     │
-│    3. cluster: tokenize → rare-token-boosted Jaccard, ≥2 outlets    │
+│    3. cluster: new articles vs recent unclustered pool (48h, window 128)│
 │        · Unicode-aware, CJK bigram expansion (cluster.ts)           │
 │    4. enrich: og:image per new-cluster article (images.ts)          │
 │        · SSRF-safe fetches, best-effort, retried next run           │
@@ -67,14 +67,23 @@ One full run: `scrape → dedup/insert → cluster → enrich → frame → main
 2. **Dedup + insert.** Only articles not already stored are inserted
    (`INSERT OR IGNORE`, primary key `dedup_key`). `insertArticles` returns the
    *new* rows — everything downstream only sees new material.
-3. **Cluster.** `clusterArticles` tokenizes titles (Unicode-aware; CJK runs
-   expand to overlapping bigrams), coalesces same-source near-duplicates
-   (Jaccard ≥ 0.7), and greedily groups stories with a composite score:
-   `Jaccard × (1 + 2 × rare-share)` above threshold 0.45, against a sliding
-   window of the 8 most recent clusters. Only clusters spanning **2+ different
-   outlets** survive. Clusters are keyed by a deterministic signature
-   (`hash(sorted article keys)`) with a unique index, so re-runs return the
-   existing cluster instead of duplicating rows.
+3. **Cluster.** The input pool is the run's new articles **plus every recent
+   unclustered article** in the clustering window (`CLUSTER_WINDOW_HOURS`, via
+   `recentUnclusteredArticles` — the `NOT EXISTS` cluster reference check).
+   Direct RSS feeds only surface each outlet's latest items, so the second
+   outlet covering a story often arrives runs/hours after the first; matching
+   against the pool catches those stories, and once a cluster is created its
+   articles leave the pool (sig uniqueness + the `clusterExistsWithFraming`
+   guard prevent re-creation). `clusterArticles` tokenizes titles
+   (Unicode-aware; CJK runs expand to overlapping bigrams), coalesces
+   same-source near-duplicates (Jaccard ≥ 0.7), and greedily groups stories
+   with a composite score: `Jaccard × (1 + 2 × rare-share)` above threshold
+   0.45, against a sliding window of the 128 most recent clusters (the pool
+   is ~10x a single run's batch; the default 8 stays for the eval corpus).
+   Only clusters spanning **2+ different outlets** survive. Clusters are
+   keyed by a deterministic signature (`hash(sorted article keys)`) with a
+   unique index, so re-runs return the existing cluster instead of
+   duplicating rows.
 4. **Enrich.** New-cluster articles without an image get their page fetched
    (6s timeout, HTML-only, `HTMLRewriter` in Workers / regex fallback in Node)
    and `og:image` extracted — never following non-http(s) schemes, always

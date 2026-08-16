@@ -119,8 +119,28 @@ export async function runPipeline(
     const newArticles = await db.insertArticles(raw.filter((a) => a.url));
     console.log(`[pipeline] ${newArticles.length} new of ${raw.length} scraped`);
 
-    // 2. Cluster the new articles
-    const clusters = clusterArticles(newArticles);
+    // 2. Cluster the new articles AGAINST the recent unclustered pool.
+    //    Direct RSS feeds only surface each outlet's latest items, so the
+    //    second outlet covering a story often arrives runs — or hours —
+    //    after the first. Clustering only same-run articles would leave
+    //    those stories invisible forever; matching against the pool (48h
+    //    window, not yet referenced by any cluster) catches them. Once a
+    //    cluster is created its articles leave the pool, so re-runs can't
+    //    re-create it (sig uniqueness + the EXISTS guard below).
+    const poolArticles = [
+      ...newArticles,
+      ...(await db.recentUnclusteredArticles(
+        new Date(Date.now() - cfg.clusterWindowHours * 3600_000),
+        2000
+      )),
+    ];
+    // The pool is ~10x bigger than a single run's batch, and the greedy
+    // pass scans newest→oldest, so the temporal window must widen to reach
+    // stories whose outlets published hours apart. 128 clusters ≈ ~9h of
+    // news at current volume — still cheap (token-set Jaccards; the
+    // threshold + rare-token boost keep unrelated stories out). Defaults
+    // in cluster.ts stay at 8 for the eval corpus.
+    const clusters = clusterArticles(poolArticles, { clusterWindow: 128 });
 
     // 2b. Enrich new-cluster articles with og:image URLs (best-effort,
     // only articles without an image yet; failures retry next run)

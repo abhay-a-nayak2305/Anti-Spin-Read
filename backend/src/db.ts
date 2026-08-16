@@ -11,6 +11,12 @@ export interface Db {
   /** Insert articles that aren't stored yet; returns only the newly inserted ones */
   insertArticles(articles: RawArticle[]): Promise<RawArticle[]>;
   recentArticles(since: Date): Promise<RawArticle[]>;
+  /**
+   * Articles published since `since` that no cluster references yet —
+   * the clustering pool. A story's second outlet can arrive runs/hours
+   * after the first; those late articles must still cluster.
+   */
+  recentUnclusteredArticles(since: Date, limit: number): Promise<RawArticle[]>;
   /** Has any framed cluster already used one of these article keys? */
   clusterExistsWithFraming(keys: string[]): Promise<boolean>;
   /**
@@ -141,6 +147,25 @@ export class D1Db implements Db {
          WHERE published_at >= ? ORDER BY published_at DESC`
       )
       .bind(since.getTime())
+      .all();
+    return results.map(toRaw);
+  }
+
+  async recentUnclusteredArticles(
+    since: Date,
+    limit: number
+  ): Promise<RawArticle[]> {
+    const { results } = await this.env
+      .prepare(
+        `SELECT a.${ARTICLE_COLS.replaceAll(", ", ", a.")} FROM articles a
+         WHERE a.published_at >= ?
+           AND NOT EXISTS (
+             SELECT 1 FROM cluster_articles ca WHERE ca.dedup_key = a.dedup_key
+           )
+         ORDER BY a.published_at DESC
+         LIMIT ?`
+      )
+      .bind(since.getTime(), limit)
       .all();
     return results.map(toRaw);
   }

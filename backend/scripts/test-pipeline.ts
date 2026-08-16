@@ -216,6 +216,36 @@ console.log("== test: runMaintenance purges old run-log rows (MemoryDb parity) =
   check("second maintenance within 24h skipped", skipped === null);
 }
 
+console.log("== test: late-arriving second outlet clusters via the pool ==");
+{
+  const db = new MemoryDb();
+  const recent = new Date();
+  const deps = (title: string, source: string) => ({
+    scrape: async () => [
+      { ...article("x", title, source), publishedAt: recent },
+    ],
+    frame: async () => framing("late story"),
+    enrich: async () => 0,
+  });
+
+  // Run 1: only BBC covers the story — nothing to cluster yet.
+  const r1 = await runPipeline(env, db, deps("Candidates clash over tax reform", "bbc"));
+  check("run 1: no cluster (single outlet)", r1.clusters === 0 && r1.framed === 0, JSON.stringify(r1));
+
+  // Run 2: CNN covers the same story — the pool match forms the cluster.
+  const r2 = await runPipeline(env, db, deps("Tax reform clash: candidates trade blows", "cnn"));
+  check("run 2: pool cluster formed and framed", r2.clusters === 1 && r2.framed === 1, JSON.stringify(r2));
+  check(
+    "cluster holds both outlets",
+    db.clusters.length === 1 && db.clusters[0].articleKeys.length === 2
+  );
+
+  // Run 3: re-running the same scrape must not duplicate the cluster.
+  const r3 = await runPipeline(env, db, deps("Tax reform clash: candidates trade blows", "cnn"));
+  check("run 3: no duplicate cluster", r3.clusters === 0 && r3.framed === 0, JSON.stringify(r3));
+  check("still exactly one cluster", db.clusters.length === 1);
+}
+
 console.log("\n=====================");
 console.log(`RESULTS: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

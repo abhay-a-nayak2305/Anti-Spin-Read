@@ -293,6 +293,31 @@ console.log("== test: pipeline run log retention (90d) ==");
   check("second purge removes no run rows", purged2.runs === 0);
 }
 
+console.log("== test: recentUnclusteredArticles clustering pool ==");
+{
+  const { db } = makeDb();
+  const now = Date.now();
+  const fresh = new Date(now - 60_000);
+  const old = new Date(now - 3 * 3600_000);
+  await db.insertArticles([
+    art("BBC", "Fresh unclustered", fresh),
+    art("CNN", "Old unclustered", old),
+  ]);
+  // A clustered article must never appear in the pool.
+  const clustered = [art("BBC", "Already clustered", fresh), art("CNN", "Already clustered", fresh)];
+  await seedCluster(db, clustered, fresh, "sig-pool");
+
+  const pool = await db.recentUnclusteredArticles(new Date(now - 2 * 3600_000), 100);
+  const titles = pool.map((a) => a.title);
+  check("fresh unclustered article in pool", titles.includes("Fresh unclustered"));
+  check("old unclustered article excluded by cutoff", !titles.includes("Old unclustered"));
+  check("clustered article excluded", !titles.includes("Already clustered"));
+  check("pool newest first", pool.length > 0 && pool[0].title === "Fresh unclustered");
+
+  const capped = await db.recentUnclusteredArticles(new Date(now - 48 * 3600_000), 1);
+  check("limit honored", capped.length === 1 && capped[0].title === "Fresh unclustered");
+}
+
 console.log("== test: meta upsert ==");
 {
   const { db } = makeDb();

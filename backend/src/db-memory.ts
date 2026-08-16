@@ -38,6 +38,21 @@ export class MemoryDb implements Db {
       .sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
   }
 
+  async recentUnclusteredArticles(
+    since: Date,
+    limit: number
+  ): Promise<RawArticle[]> {
+    const referenced = new Set(this.clusters.flatMap((c) => c.articleKeys));
+    return [...this.articles.values()]
+      .filter(
+        (a) =>
+          a.publishedAt >= since &&
+          !referenced.has(a.dedupKey)
+      )
+      .sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime())
+      .slice(0, limit);
+  }
+
   async clusterExistsWithFraming(keys: string[]): Promise<boolean> {
     return this.clusters.some(
       (c) => c.framing !== null && keys.some((k) => c.articleKeys.includes(k))
