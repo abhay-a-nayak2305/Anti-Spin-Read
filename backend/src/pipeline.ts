@@ -11,9 +11,11 @@ const FRAMING_CONCURRENCY = 3;
 const RETRY_BATCH = 50;
 // Workers free plan caps outbound requests at 50 per invocation. One run
 // spends ~18 on RSS, so enrichment and framing must share the remaining
-// ~32: ENRICH_BATCH × 1 + FRAMING_BATCH × 2 (primary + fallback) ≤ 32.
-const ENRICH_BATCH = 15;
-const FRAMING_BATCH = 8;
+// ~32: ENRICH_BATCH × 1 hop + FRAMING_BATCH × 5 (3 primary + 2 fallback
+// attempts, worst case) ≤ 32 → 10 + 20 = 30, leaving 2 subrequests of
+// margin for a redirecting feed.
+const ENRICH_BATCH = 10;
+const FRAMING_BATCH = 4;
 const RETENTION_DAYS = 14;
 const RUNS_RETENTION_DAYS = 90; // pipeline_runs log is bound separately
 const MAINTENANCE_INTERVAL_MS = 24 * 3600_000;

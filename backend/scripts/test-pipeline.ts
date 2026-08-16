@@ -279,17 +279,20 @@ console.log("\n== test: framing batch cap (subrequest budget) ==");
   const r1 = await runPipeline(env, db, deps);
   check("run 1: 12 clusters found", r1.clusters === 12, JSON.stringify(r1));
   check(
-    "run 1: only 8 framed (FRAMING_BATCH)",
-    r1.framed === 8 && r1.failed === 0,
+    "run 1: only 4 framed (FRAMING_BATCH)",
+    r1.framed === 4 && r1.failed === 0,
     JSON.stringify(r1)
   );
 
   const unframed = await db.clustersNeedingFraming(50);
-  check("4 clusters left in the retry queue", unframed.length === 4, String(unframed.length));
+  check("8 clusters left in the retry queue", unframed.length === 8, String(unframed.length));
 
-  // Next run (no new material) frames the rest.
+  // Next runs (no new material) frame the rest, 4 per run.
   const r2 = await runPipeline(env, db, { ...deps, scrape: async () => [] });
-  check("run 2: remaining 4 framed", r2.framed === 4 && r2.failed === 0, JSON.stringify(r2));
+  check("run 2: next 4 framed", r2.framed === 4 && r2.failed === 0, JSON.stringify(r2));
+  check("4 clusters left", (await db.clustersNeedingFraming(50)).length === 4);
+  const r3 = await runPipeline(env, db, { ...deps, scrape: async () => [] });
+  check("run 3: last 4 framed", r3.framed === 4 && r3.failed === 0, JSON.stringify(r3));
   check("retry queue empty", (await db.clustersNeedingFraming(50)).length === 0);
 }
 

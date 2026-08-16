@@ -233,6 +233,11 @@ async function readCappedText(body: ReadableStream | null): Promise<string> {
  * Workers runtime uses HTMLRewriter (streaming, cheap); Node tests fall
  * back to the regex extractor. Never follows non-http schemes, reads at
  * most MAX_BODY_CHARS, and requires a text/html content type.
+ * Redirects are NOT followed (`redirect: "manual"`): every hop counts as a
+ * subrequest against the Worker's 50-per-invocation budget, and article
+ * URLs commonly chain 2–3 redirects. A 3xx is treated as "no image" (the
+ * row retries next run). The SSRF re-check on `res.url` stays for defense
+ * in depth.
  */
 export async function fetchOgImage(
   url: string,
@@ -244,7 +249,7 @@ export async function fetchOgImage(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
-      redirect: "follow",
+      redirect: "manual",
       signal: controller.signal,
       headers: {
         "User-Agent":

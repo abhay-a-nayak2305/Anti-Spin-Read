@@ -187,21 +187,27 @@ console.log("== test: fetchOgImage via stubbed fetch ==");
       const got3 = await fetchOgImage("http://127.0.0.1/x", 2000);
       check("unsafe url never fetched", got3 === "" && !called);
 
-      // redirect chain leaving public web -> skipped
-      await stubFetch(async () => ({
-        ok: true,
-        status: 200,
-        url: "http://169.254.169.254/latest",
-        headers: new Headers({ "content-type": "text/html" }),
-        body: new ReadableStream({
-          start(c) {
-            c.enqueue(new TextEncoder().encode("<html></html>"));
-            c.close();
-          },
-        }),
-      }));
+      // 3xx redirect -> skipped, and never followed (each hop is a
+      // subrequest against the 50-per-invocation budget)
+      let redirectCalls = 0;
+      await stubFetch(async () => {
+        redirectCalls++;
+        return {
+          ok: false,
+          status: 302,
+          url: "https://a.example/redirect",
+          headers: new Headers({ location: "https://a.example/real-story" }),
+          body: new ReadableStream({
+            start(c) {
+              c.enqueue(new TextEncoder().encode(""));
+              c.close();
+            },
+          }),
+        };
+      });
       const got4 = await fetchOgImage("https://a.example/redirect", 2000);
-      check("final url validated after redirect", got4 === "");
+      check("3xx redirect skipped", got4 === "");
+      check("redirect not followed (1 subrequest only)", redirectCalls === 1);
 
       // timeout abort: fetch that never resolves but honors the signal
       await stubFetch((_url, init) =>
