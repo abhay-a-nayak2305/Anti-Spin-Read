@@ -17,3 +17,7 @@ frontend/tests/ui_screenshot.png
 modal.png
 test-results/
 final-verification.png
+
+.dev.vars*
+!.dev.vars.example
+!.env.example
