@@ -153,6 +153,7 @@ export function StoryModal({
         ref={panelRef}
         tabIndex={-1}
         className={`modal-panel slab bg-paper outline-none ${meta.shadow}`}
+        style={{ "--cat": meta.selection } as React.CSSProperties}
       >
         {/* header */}
         <div className="flex items-start justify-between gap-3 border-b-4 border-ink px-5 py-4">

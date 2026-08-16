@@ -25,7 +25,10 @@ export function StoryCard({
   const meta = categoryMeta(cluster.category);
 
   return (
-    <article className={`slab flex flex-col bg-paper ${meta.shadow}`}>
+    <article
+      className={`story-card slab flex flex-col bg-paper ${meta.shadow}`}
+      style={{ "--cat": meta.selection } as React.CSSProperties}
+    >
       {/* clickable image (or NO-IMAGE placeholder when the article has none) */}
       <button
         type="button"

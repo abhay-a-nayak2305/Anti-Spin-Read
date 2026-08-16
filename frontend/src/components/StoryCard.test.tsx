@@ -29,4 +29,13 @@ describe("StoryCard", () => {
     render(<StoryCard cluster={cluster} onOpen={vi.fn()} />);
     expect(screen.queryByText("New")).not.toBeInTheDocument();
   });
+
+  it("themes text selection with the story's category color", () => {
+    const { container } = render(<StoryCard cluster={cluster} onOpen={vi.fn()} />);
+    const card = container.querySelector(".story-card");
+    expect(card).not.toBeNull();
+    expect((card as HTMLElement).style.getPropertyValue("--cat")).toBe(
+      "var(--color-cat-world)"
+    );
+  });
 });

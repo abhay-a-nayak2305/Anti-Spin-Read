@@ -70,6 +70,17 @@ describe("StoryModal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("themes text selection with the story's category color", () => {
+    const { container } = render(
+      <StoryModal cluster={cluster} onClose={vi.fn()} />
+    );
+    const panel = container.querySelector(".modal-panel");
+    expect(panel).not.toBeNull();
+    expect((panel as HTMLElement).style.getPropertyValue("--cat")).toBe(
+      "var(--color-cat-world)"
+    );
+  });
+
   it("wraps Tab from the last focusable to the first and Shift+Tab back", () => {
     const { container } = render(
       <StoryModal cluster={cluster} onClose={vi.fn()} />

@@ -66,6 +66,8 @@ export interface CategoryMeta {
   text: string;
   /** solid fill (bg + readable text) for modal blocks — category-colored */
   fill: string;
+  /** category color as a CSS var — used for text selection highlight */
+  selection: string;
 }
 
 export const CATEGORY_ORDER: CategoryId[] = [
@@ -86,6 +88,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     shadow: "shadow-[8px_8px_0_var(--color-cat-politics)]",
     text: "text-cat-politics",
     fill: "bg-cat-politics text-ink",
+    selection: "var(--color-cat-politics)",
   },
   world: {
     label: "World",
@@ -93,6 +96,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     shadow: "shadow-[8px_8px_0_var(--color-cat-world)]",
     text: "text-cat-world",
     fill: "bg-cat-world text-ink",
+    selection: "var(--color-cat-world)",
   },
   business: {
     label: "Business",
@@ -100,6 +104,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     shadow: "shadow-[8px_8px_0_var(--color-cat-business)]",
     text: "text-cat-business",
     fill: "bg-cat-business text-ink",
+    selection: "var(--color-cat-business)",
   },
   tech: {
     label: "Tech",
@@ -107,6 +112,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     shadow: "shadow-[8px_8px_0_var(--color-cat-tech)]",
     text: "text-cat-tech",
     fill: "bg-cat-tech text-ink",
+    selection: "var(--color-cat-tech)",
   },
   "science-health": {
     label: "Science & Health",
@@ -114,6 +120,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     shadow: "shadow-[8px_8px_0_var(--color-cat-science)]",
     text: "text-cat-science",
     fill: "bg-cat-science text-ink",
+    selection: "var(--color-cat-science)",
   },
   "crime-justice": {
     label: "Crime & Justice",
@@ -121,6 +128,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     shadow: "shadow-[8px_8px_0_var(--color-cat-crime)]",
     text: "text-cat-crime",
     fill: "bg-cat-crime text-paper",
+    selection: "var(--color-cat-crime)",
   },
   "culture-sport": {
     label: "Culture & Sport",
@@ -128,6 +136,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     shadow: "shadow-[8px_8px_0_var(--color-cat-culture)]",
     text: "text-cat-culture",
     fill: "bg-cat-culture text-ink",
+    selection: "var(--color-cat-culture)",
   },
   other: {
     label: "Other",
@@ -135,6 +144,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     shadow: "shadow-[8px_8px_0_var(--color-ink)]",
     text: "text-paper",
     fill: "bg-paper text-ink",
+    selection: "var(--color-acid)",
   },
 };
 

@@ -45,6 +45,15 @@
     color: var(--color-ink);
   }
 
+  /* Text selection inside a story card or the modal follows that story's
+     category color (--cat is set inline from categoryMeta().selection);
+     the acid yellow stays for chrome — header, ticker, filters. */
+  .story-card ::selection,
+  .modal-panel ::selection {
+    background: var(--cat, var(--color-acid));
+    color: var(--color-ink);
+  }
+
   :focus-visible {
     outline: 3px solid var(--color-acid);
     outline-offset: 2px;

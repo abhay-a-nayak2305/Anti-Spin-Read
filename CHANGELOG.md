@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Text selection follows the story's theme.** Highlighting text on a
+  story card or in the modal now highlights with that story's category
+  color (each card/panel sets `--cat` from `categoryMeta().selection`);
+  the acid-yellow selection remains only on chrome — header, ticker,
+  filters.
+
 ### Fixed
 
 - **Stories stuck invisible — clustering only saw same-run articles.** Each
