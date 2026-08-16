@@ -22,7 +22,7 @@ const env: Env = {
   DB: undefined as never,
   ASSETS: undefined as never,
   GEMINI_API_KEY: "test-key",
-  GEMINI_MODEL: "gemini-2.0-flash",
+  GEMINI_MODEL: "gemini-3.5-flash",
   CLUSTER_WINDOW_HOURS: "48",
 };
 
@@ -68,8 +68,8 @@ console.log("== test: pipeline happy path ==");
   check("scraped 3", result.scraped === 3);
   check("clusters found 1", result.clusters === 1);
   check("no failures", result.failed === 0);
-  check("frame received apiKey + model", calls[0]?.opts.apiKey === "test-key" && calls[0]?.opts.model === "gemini-2.0-flash");
-  check("frame received fallbackModel", calls[0]?.opts.fallbackModel === "gemini-1.5-flash");
+  check("frame received apiKey + model", calls[0]?.opts.apiKey === "test-key" && calls[0]?.opts.model === "gemini-3.5-flash");
+  check("frame received fallbackModel", calls[0]?.opts.fallbackModel === "gemini-3.1-flash-lite");
   check("frame received both articles", calls[0]?.cluster.length === 2);
   check("lock released after run", db.lock === null);
   check("not skipped", result.skipped === undefined);

@@ -160,7 +160,18 @@ export async function frameCluster(
           const retryable = res.status === 429 || res.status >= 500;
           const message = `Gemini HTTP ${res.status}: ${detail.slice(0, 200)}`;
           lastErr = new Error(message);
-          if (!retryable) throw lastErr;
+          if (!retryable) {
+            // Model-not-found (404) should try the fallback model instead of
+            // failing hard — the fallback exists precisely for deprecations.
+            if (res.status === 404 && mi < models.length - 1) {
+              console.warn(
+                `[framing] model ${model} not found (HTTP 404); ` +
+                  `falling back to ${models[mi + 1]}`
+              );
+              break; // outer loop continues with the next model
+            }
+            throw lastErr;
+          }
           continue;
         }
 

@@ -300,8 +300,8 @@ Preflight (`OPTIONS *`) returns `204` with no body.
 | `CRON_SECRET` | secret | *none — fail closed* | `POST /api/cron` auth |
 | `CRON_RATE_LIMIT` | var | `5` | `/api/cron` per-IP window (10 min) |
 | `GEMINI_API_KEY` | secret | *none* | pipeline framing |
-| `GEMINI_MODEL` | var | `gemini-2.0-flash` | primary framing model |
-| `GEMINI_MODEL_FALLBACK` | var | `gemini-1.5-flash` | fallback after primary retries exhausted |
+| `GEMINI_MODEL` | var | `gemini-3.5-flash` | primary framing model |
+| `GEMINI_MODEL_FALLBACK` | var | `gemini-3.1-flash-lite` | fallback after primary retries exhausted |
 | `CLUSTER_WINDOW_HOURS` | var | `48` | scrape/cluster window |
 | `ALLOWED_ORIGINS` | var | dev origins | CORS allowlist |
 

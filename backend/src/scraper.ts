@@ -5,8 +5,9 @@ import type { RawArticle } from "./types.js";
 const parser = new Parser({ timeout: 15000 });
 
 const FEED_TIMEOUT_MS = 15000;
-const MAX_FEED_BYTES = 4 * 1024 * 1024;
+const MAX_FEED_BYTES = 2 * 1024 * 1024; // 2 MB — caps worst-case xml2js memory per feed
 const MAX_ITEMS_PER_FEED = 200;
+const SCRAPE_BATCH = 4; // bound parallel fetches+parses (peak memory + subrequest concurrency)
 
 /** Google News RSS filtered to one outlet's domain — stable, free, no per-site scraping */
 function googleNewsFeedUrl(site: string, hours: number): string {
@@ -168,20 +169,27 @@ async function fetchFeedXml(url: string): Promise<string> {
   }
 }
 
-/** Fetch latest articles from all configured outlets via Google News RSS */
+/** Fetch latest articles from all configured outlets via direct RSS (with
+ *  optional Google News fallback). Runs sources in bounded-size batches so
+ *  that at most `SCRAPE_BATCH` feeds are fetched and parsed simultaneously —
+ *  this keeps peak memory and parallel-subrequest count bounded. */
 export async function scrapeAll(windowHours: number): Promise<RawArticle[]> {
-  const results = await Promise.allSettled(
-    sources.map((source) => scrapeSource(source.label, source.site, windowHours))
-  );
-
   const articles: RawArticle[] = [];
-  results.forEach((r, i) => {
-    if (r.status === "fulfilled") {
-      articles.push(...r.value);
-    } else {
-      console.warn(`[scraper] ${sources[i].label} failed: ${r.reason}`);
-    }
-  });
+  for (let i = 0; i < sources.length; i += SCRAPE_BATCH) {
+    const batch = sources.slice(i, i + SCRAPE_BATCH);
+    const results = await Promise.allSettled(
+      batch.map((source) =>
+        scrapeSource(source.label, source.site, windowHours)
+      )
+    );
+    results.forEach((r, j) => {
+      if (r.status === "fulfilled") {
+        articles.push(...r.value);
+      } else {
+        console.warn(`[scraper] ${batch[j].label} failed: ${r.reason}`);
+      }
+    });
+  }
   console.log(`[scraper] collected ${articles.length} articles`);
   return articles;
 }

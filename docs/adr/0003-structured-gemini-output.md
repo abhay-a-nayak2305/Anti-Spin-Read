@@ -38,12 +38,14 @@ Three layers, each with a distinct job:
    - **on read** — `D1Db.latestClusters` re-validates stored JSON with
      `parseFraming`; a corrupt row is skipped, never served.
 3. **Model fallback** — the primary model (`GEMINI_MODEL`, default
-   `gemini-2.0-flash`) gets 3 attempts with backoff (500/1500 ms); transient
+   `gemini-3.5-flash`) gets 3 attempts with backoff (500/1500 ms); transient
    failures (429, 5xx, network, parse/validation) retry, non-retryable 4xx
    fail fast. When the primary is exhausted, `GEMINI_MODEL_FALLBACK` (default
-   `gemini-1.5-flash`) gets 2 attempts before the cluster is marked failed
+   `gemini-3.1-flash-lite`) gets 2 attempts before the cluster is marked failed
    (`framing_error` recorded, retried from the queue on the next pipeline
-   run). See `frameCluster` in `backend/src/framing.ts`.
+   run). Model-not-found 404s (deprecated/renamed models) switch to the
+   fallback model instead of failing fast. See `frameCluster` in
+   `backend/src/framing.ts`.
 
 ## Why
 

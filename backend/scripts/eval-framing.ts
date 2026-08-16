@@ -107,7 +107,7 @@ async function liveEval(): Promise<void> {
   console.log("== live Gemini eval ==");
   const f = await frameCluster(
     [art("CNN", "Ousted Syrian dictator Bashar al-Assad sentenced to death in absentia"), art("BBC", "Former Syrian President Assad sentenced to death in absentia")],
-    { apiKey: process.env.GEMINI_API_KEY!, model: process.env.GEMINI_MODEL ?? "gemini-2.0-flash" }
+    { apiKey: process.env.GEMINI_API_KEY!, model: process.env.GEMINI_MODEL ?? "gemini-3.5-flash" }
   );
   const { points, max, notes } = scoreFraming(f);
   console.log(JSON.stringify(f, null, 2));

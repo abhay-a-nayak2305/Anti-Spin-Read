@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet — the hardening pass shipped as 1.0.0.
+### Fixed
+
+- **Pipeline hard-kill on production (`exceededResources`)** — scheduled runs
+  were being killed by the platform mid-scrape (after the feed batch, ~20 ms
+  CPU, no run row, no lock release). Root cause: up to 8 feed fetches fired in
+  parallel against Cloudflare's per-request outbound-connection limits, with a
+  4 MB per-feed body cap letting oversized feeds hold connections open. The
+  scraper now fetches feeds in bounded batches of 4 (`SCRAPE_BATCH`) and caps
+  each feed at 2 MB (`MAX_FEED_BYTES`), keeping in-flight connections within
+  platform limits. Verified: 10+ consecutive full runs (scrape → dedup →
+  cluster → frame → maintain) complete every 15 minutes.
+- **Framing stuck failing on retired Gemini models** — `gemini-2.0-flash` was
+  retired ("no longer available to new users"); `frameCluster` treated a 404 as
+  a non-retryable failure and never tried the fallback model, so every cluster
+  recorded `framing_error` on every run. Two changes: model-not-found 404s now
+  switch to the fallback model (matching the documented fallback semantics),
+  and the model defaults moved to currently-available models —
+  `GEMINI_MODEL` `gemini-3.5-flash` (stable), `GEMINI_MODEL_FALLBACK`
+  `gemini-3.1-flash-lite`.
+
+### Changed
+
+- **Scraper feed budget** — `MAX_FEED_BYTES` 4 MB → 2 MB; feed fetch loop
+  bounded to `SCRAPE_BATCH = 4` concurrent fetches.
 
 ## [1.0.0] - 2026-08-15
 

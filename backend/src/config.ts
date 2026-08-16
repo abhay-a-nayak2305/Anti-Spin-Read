@@ -18,10 +18,10 @@ export const DEFAULT_CLUSTER_WINDOW_HOURS = 48;
 export function workerConfig(env: Env) {
   return {
     geminiApiKey: env.GEMINI_API_KEY ?? "",
-    geminiModel: env.GEMINI_MODEL ?? "gemini-2.0-flash",
+    geminiModel: env.GEMINI_MODEL ?? "gemini-3.5-flash",
     // Secondary model used when the primary exhausts its retries
     // (outage, quota, model deprecation).
-    geminiModelFallback: env.GEMINI_MODEL_FALLBACK ?? "gemini-1.5-flash",
+    geminiModelFallback: env.GEMINI_MODEL_FALLBACK ?? "gemini-3.1-flash-lite",
     // Fail closed: no default fallback. /api/cron returns 503 when unset.
     cronSecret: env.CRON_SECRET ?? "",
     // How far back a story can be to still join a new cluster.

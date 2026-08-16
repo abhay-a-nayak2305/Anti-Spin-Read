@@ -36,7 +36,7 @@
   //   npx wrangler secret put GEMINI_API_KEY
   //   npx wrangler secret put CRON_SECRET
   "vars": {
-    "GEMINI_MODEL": "gemini-2.0-flash",
+    "GEMINI_MODEL": "gemini-3.5-flash",
     "CLUSTER_WINDOW_HOURS": "48",
     // Comma-separated CORS allowlist; default (unset) = local dev origins.
     // Production serves the SPA and API same-origin, so this rarely matters.
