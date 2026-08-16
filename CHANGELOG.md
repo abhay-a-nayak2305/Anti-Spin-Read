@@ -62,7 +62,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/backfill-images.ts` (local run against the D1 REST API), and
   the pipeline now runs a per-run enrichment catch-up
   (`articlesInClustersMissingImages`) so no cluster-referenced article
-  stays image-less forever.
+  stays image-less forever. Two follow-up backfills recovered the hard
+  cases: `backfill-feed-images.ts` (matches feed-carried images to stored
+  rows by URL — cleared Sky News/The Hill) and
+  `backfill-follow-redirect.ts` (follows Google-News redirect chains
+  locally, outside the Worker's subrequest budget — cleared NPR/USA Today
+  and DW). Three articles are unreachable by any path (two outlets return
+  403 to every client, one page ships no og:image) and show the favicon /
+  monogram fallback until they age out.
 - **Unbounded pipeline run log** — `pipeline_runs` kept one row per 15-min
   run forever (~35k rows/year). The daily retention purge now also drops
   run-log rows older than 90 days (`RUNS_RETENTION_DAYS`), so every table
