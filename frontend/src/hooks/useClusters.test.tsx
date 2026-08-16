@@ -49,6 +49,7 @@ function stubDocumentHidden(hidden: boolean): () => void {
 
 beforeEach(() => {
   fetchMock.mockReset();
+  localStorage.clear();
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -248,5 +249,52 @@ describe("useClusters", () => {
       expect.stringContaining("limit=50&offset=0"),
       expect.anything()
     );
+  });
+
+  it("keeps newSince null on initial load and auto-polls (only manual refresh advances it)", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(jsonResponse(makeResponse([makeCluster("a")])));
+
+    const { result } = renderHook(() => useClusters());
+    await act(async () => {}); // initial load
+    expect(result.current.newSince).toBeNull();
+
+    vi.advanceTimersByTime(60_000); // an auto-poll cycle
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.newSince).toBeNull(); // poll must NOT move the watermark
+  });
+
+  it("advances newSince on manual refresh and persists it", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(makeResponse([makeCluster("a")])))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          makeResponse([
+            { ...makeCluster("a"), seenAt: "2026-08-15T10:00:00Z" },
+            { ...makeCluster("b"), seenAt: "2026-08-15T11:00:00Z" },
+          ])
+        )
+      );
+
+    const { result } = renderHook(() => useClusters());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.newSince).toBeNull();
+
+    act(() => {
+      void result.current.refresh();
+    });
+    await waitFor(() => expect(result.current.newSince).toBe("2026-08-15T11:00:00Z"));
+    // Persisted so a later page load knows what this visit acknowledged.
+    expect(localStorage.getItem("asr.newSince")).toBe("2026-08-15T11:00:00Z");
+  });
+
+  it("restores the watermark from localStorage on mount", async () => {
+    localStorage.setItem("asr.newSince", "2026-08-15T09:00:00Z");
+    fetchMock.mockResolvedValue(jsonResponse(makeResponse([makeCluster("a")])));
+
+    const { result } = renderHook(() => useClusters());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.newSince).toBe("2026-08-15T09:00:00Z");
   });
 });

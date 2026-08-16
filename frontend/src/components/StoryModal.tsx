@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { Cluster } from "../types";
-import { categoryMeta, faviconUrl, framingStatus, timeAgo, toneClass } from "../types";
+import { categoryMeta, faviconUrl, timeAgo, toneClass } from "../types";
 import { HeroImage } from "./HeroImage";
 import { LetterBadge } from "./LetterBadge";
-import { SourceCountBadge, StatusBadge, ToneChip } from "./badges";
+import { SourceCountBadge, ToneChip } from "./badges";
 
 /**
  * Article thumbnail with the same privacy-preserving chain as the hero:
@@ -53,6 +53,7 @@ function Section({
   children,
 }: {
   title: string;
+  /** stamp--alarm for omission sections; default is the story's category fill. */
   accent: string;
   children: React.ReactNode;
 }) {
@@ -164,10 +165,6 @@ export function StoryModal({
               <span className="text-[11px] uppercase tracking-widest text-ink/60">
                 {timeAgo(cluster.seenAt)}
               </span>
-              <StatusBadge
-                status={framingStatus(cluster)}
-                className="text-[10px]"
-              />
             </div>
             <h2 className="font-display text-xl sm:text-2xl leading-tight">
               {cluster.keyPhrase}
@@ -197,7 +194,7 @@ export function StoryModal({
           )}
 
           {f && (
-            <Section title="How the coverage differs" accent="">
+            <Section title="How the coverage differs" accent={meta.fill}>
               {f.headlineDeltas.map((d, i) => (
                 <li key={i} className="flex gap-2 text-sm leading-relaxed">
                   <span className="text-ink/40 shrink-0" aria-hidden>▸</span>
@@ -219,7 +216,7 @@ export function StoryModal({
           )}
 
           {f && (
-            <Section title="Tone by outlet" accent="">
+            <Section title="Tone by outlet" accent={meta.fill}>
               <div className="flex flex-wrap gap-2">
                 {f.toneTags.map((t, i) => (
                   <ToneChip
@@ -234,7 +231,9 @@ export function StoryModal({
           )}
 
           {f && (
-            <div className="mt-6 border-2 border-ink bg-acid p-4 shadow-[4px_4px_0_#0a0a0a]">
+            <div
+              className={`mt-6 border-2 border-ink ${meta.fill} p-4 shadow-[4px_4px_0_var(--color-ink)]`}
+            >
               <p className="text-sm leading-relaxed">
                 <span className="font-display uppercase">The story: </span>
                 {f.neutralSummary}
@@ -242,7 +241,7 @@ export function StoryModal({
             </div>
           )}
 
-          <Section title="The news, outlet by outlet" accent="">
+          <Section title="The news, outlet by outlet" accent={meta.fill}>
             {cluster.articles.map((a) => {
               const tone = f?.toneTags.find((t) => t.source === a.source);
               return (
@@ -289,7 +288,7 @@ export function StoryModal({
                         href={a.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="stamp bg-acid text-[10px] hover:bg-ink hover:text-paper"
+                        className={`stamp ${meta.fill} text-[10px] hover:bg-ink hover:text-paper`}
                       >
                         READ FULL ARTICLE →
                       </a>

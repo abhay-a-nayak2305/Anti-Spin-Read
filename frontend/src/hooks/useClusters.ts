@@ -7,6 +7,40 @@ const POLL_INTERVAL = 60_000; // normal cadence between successful polls
 const BACKOFF_BASE = 1_000; // first retry delay after a failed poll
 const BACKOFF_CAP = 60_000; // backoff grows 1s, 2s, 4s, 8s … capped here
 
+/**
+ * "New since your last visit" watermark — the newest `seenAt` the user has
+ * explicitly acknowledged. Persisted so a later page load knows what the
+ * previous visit already showed. ISO timestamps compare lexicographically.
+ */
+const NEW_SINCE_KEY = "asr.newSince";
+
+function readWatermark(): string | null {
+  try {
+    return window.localStorage.getItem(NEW_SINCE_KEY);
+  } catch {
+    return null; // storage unavailable (private mode) — no watermark, no badges
+  }
+}
+
+function writeWatermark(iso: string): void {
+  try {
+    window.localStorage.setItem(NEW_SINCE_KEY, iso);
+  } catch {
+    /* best-effort: badges just won't persist across reloads */
+  }
+}
+
+/** Newest `seenAt` across the page, or null for an empty page. */
+function maxSeenAt(clusters: Cluster[]): string | null {
+  let max: string | null = null;
+  for (const c of clusters) {
+    if (typeof c.seenAt === "string" && (max === null || c.seenAt > max)) {
+      max = c.seenAt;
+    }
+  }
+  return max;
+}
+
 /** Append `incoming` to `existing`, dropping clusters whose id is already present. */
 function mergeClusters(existing: Cluster[], incoming: Cluster[]): Cluster[] {
   const seen = new Set(existing.map((c) => c.id));
@@ -27,6 +61,10 @@ function mergeClusters(existing: Cluster[], incoming: Cluster[]): Cluster[] {
  *   60s). A successful poll resets the backoff and resumes the 60s cadence.
  * - Automatic polls are skipped while the tab is hidden; manual refresh
  *   always fetches.
+ * - "New since your last visit": `newSince` is the newest `seenAt` the user
+ *   has acknowledged. It advances ONLY on manual refresh (initial loads and
+ *   auto-polls leave it alone), so stories that appear while the page is
+ *   open keep their NEW badge until the user explicitly refreshes.
  */
 export function useClusters() {
   const [data, setData] = useState<ClustersResponse | null>(null);
@@ -35,6 +73,8 @@ export function useClusters() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  // Watermark from the previous visit (persisted), or null on a first visit.
+  const [newSince, setNewSince] = useState<string | null>(readWatermark);
 
   const abortRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
@@ -49,7 +89,8 @@ export function useClusters() {
     async (
       offset: number,
       mode: "replace" | "append",
-      silent = false
+      silent = false,
+      markSeen = false
     ): Promise<boolean> => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -84,6 +125,15 @@ export function useClusters() {
           dataRef.current = body; // page 1 replaces everything
           setData(body);
           countRef.current = body.clusters.length;
+          if (markSeen) {
+            // Acknowledged: advance the watermark to the newest story on the
+            // page so the NEXT batch is what counts as new.
+            const max = maxSeenAt(body.clusters);
+            if (max !== null) {
+              setNewSince(max);
+              writeWatermark(max);
+            }
+          }
         }
         setHasMore(body.hasMore);
         nextDelayRef.current = BACKOFF_BASE; // success resets the backoff
@@ -108,7 +158,7 @@ export function useClusters() {
 
   /** First page (offset 0), replacing state — initial load, polls, refresh. */
   const load = useCallback(
-    (silent = false) => fetchPage(0, "replace", silent),
+    (silent = false, markSeen = false) => fetchPage(0, "replace", silent, markSeen),
     [fetchPage]
   );
 
@@ -168,7 +218,8 @@ export function useClusters() {
     refreshing,
     loadingMore,
     hasMore,
-    refresh: () => load(true),
+    newSince,
+    refresh: () => load(true, true),
     loadMore,
   };
 }

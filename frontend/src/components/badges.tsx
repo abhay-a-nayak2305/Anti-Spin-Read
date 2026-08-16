@@ -27,29 +27,6 @@ export function SourceCountBadge({
   );
 }
 
-/** Framing status stamp — alarm for FAILED, dashed for PENDING. */
-export function StatusBadge({
-  status,
-  className = "",
-}: {
-  status: "FRAMED" | "FAILED" | "PENDING";
-  className?: string;
-}) {
-  return (
-    <span
-      className={`stamp ${
-        status === "FAILED"
-          ? "stamp--alarm"
-          : status === "PENDING"
-            ? "stamp--pending"
-            : ""
-      } ${className}`}
-    >
-      {status}
-    </span>
-  );
-}
-
 /** Tone chip — colored via toneClass, labeled "source: tone". */
 export function ToneChip({
   source,

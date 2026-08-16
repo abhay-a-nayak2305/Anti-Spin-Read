@@ -63,10 +63,16 @@ function CategoryFilter({
 }
 
 export default function App() {
-  const { data, loading, error, hasMore, loadingMore, loadMore } =
+  const { data, loading, error, hasMore, loadingMore, loadMore, newSince, refresh } =
     useClusters();
   const clusters = useMemo(() => data?.clusters ?? [], [data]);
   const framed = useMemo(() => clusters.filter((c) => c.framing), [clusters]);
+
+  // Stories that appeared since the last acknowledged watermark.
+  const newCount = useMemo(() => {
+    if (newSince === null) return 0;
+    return clusters.filter((c) => c.seenAt > newSince).length;
+  }, [clusters, newSince]);
 
   // URL-synced filter: initialize from ?category=… (valid ids only) and
   // keep the address bar in sync via replaceState so Back stays sane.
@@ -121,6 +127,26 @@ export default function App() {
       </ErrorBoundary>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
+        {newSince !== null && (
+          <div className="mb-5 flex items-center justify-between">
+            {newCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => void refresh()}
+                aria-label={`${newCount} new ${newCount === 1 ? "story" : "stories"} — click to refresh and mark read`}
+                className="flex items-center gap-2 border-2 border-ink bg-acid px-3 py-1.5 font-display text-[11px] uppercase tracking-wide shadow-[4px_4px_0_var(--color-ink)] transition-transform hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-1 active:translate-y-1"
+              >
+                <span className="h-2 w-2 rounded-full bg-alarm" aria-hidden="true" />
+                {newCount} new {newCount === 1 ? "story" : "stories"} — click to mark read
+              </button>
+            ) : (
+              <p className="text-[11px] uppercase tracking-widest text-ink/50">
+                You're all caught up
+              </p>
+            )}
+          </div>
+        )}
+
         <CategoryFilter active={filter} counts={counts} onChange={updateFilter} />
 
         <div className="mt-8 space-y-8">
@@ -193,6 +219,7 @@ export default function App() {
                   cluster={c}
                   onOpen={openModal}
                   eager={i === 0}
+                  isNew={newSince !== null && c.seenAt > newSince}
                 />
               ))}
             </div>

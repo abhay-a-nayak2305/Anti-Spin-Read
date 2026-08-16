@@ -44,24 +44,15 @@ export interface ClustersResponse {
 
 const TONE_COLORS: Record<string, string> = {
   neutral: "bg-paper text-ink",
-  urgent: "bg-acid text-ink",
+  urgent: "bg-cat-business text-ink",
   alarmist: "bg-alarm text-paper",
-  skeptical: "bg-paper text-ink border-dashed",
-  celebratory: "bg-acid text-ink",
-  analytical: "bg-paper text-ink",
+  skeptical: "bg-cat-culture text-paper border-dashed",
+  celebratory: "bg-cat-science text-ink",
+  analytical: "bg-cat-world text-ink",
 };
 
 export function toneClass(tone: string): string {
   return TONE_COLORS[tone] ?? TONE_COLORS.neutral;
-}
-
-export type FramingStatus = "FRAMED" | "FAILED" | "PENDING";
-
-/** Derive the framing status stamp from a cluster's framing fields. */
-export function framingStatus(cluster: Cluster): FramingStatus {
-  if (cluster.framing) return "FRAMED";
-  if (cluster.framingError) return "FAILED";
-  return "PENDING";
 }
 
 /** Per-category brutalist styling — each category owns a color. */
@@ -73,6 +64,8 @@ export interface CategoryMeta {
   shadow: string;
   /** accent text color */
   text: string;
+  /** solid fill (bg + readable text) for modal blocks — category-colored */
+  fill: string;
 }
 
 export const CATEGORY_ORDER: CategoryId[] = [
@@ -92,48 +85,56 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     stamp: "bg-cat-politics text-ink border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-politics)]",
     text: "text-cat-politics",
+    fill: "bg-cat-politics text-ink",
   },
   world: {
     label: "World",
     stamp: "bg-cat-world text-ink border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-world)]",
     text: "text-cat-world",
+    fill: "bg-cat-world text-ink",
   },
   business: {
     label: "Business",
     stamp: "bg-cat-business text-ink border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-business)]",
     text: "text-cat-business",
+    fill: "bg-cat-business text-ink",
   },
   tech: {
     label: "Tech",
     stamp: "bg-cat-tech text-ink border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-tech)]",
     text: "text-cat-tech",
+    fill: "bg-cat-tech text-ink",
   },
   "science-health": {
     label: "Science & Health",
     stamp: "bg-cat-science text-ink border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-science)]",
     text: "text-cat-science",
+    fill: "bg-cat-science text-ink",
   },
   "crime-justice": {
     label: "Crime & Justice",
     stamp: "bg-cat-crime text-paper border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-crime)]",
     text: "text-cat-crime",
+    fill: "bg-cat-crime text-paper",
   },
   "culture-sport": {
     label: "Culture & Sport",
     stamp: "bg-cat-culture text-ink border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-culture)]",
     text: "text-cat-culture",
+    fill: "bg-cat-culture text-ink",
   },
   other: {
     label: "Other",
     stamp: "bg-paper text-ink border-ink border-dashed",
     shadow: "shadow-[8px_8px_0_var(--color-ink)]",
     text: "text-paper",
+    fill: "bg-paper text-ink",
   },
 };
 

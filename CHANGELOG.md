@@ -31,6 +31,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Scraper feed budget** — `MAX_FEED_BYTES` 4 MB → 2 MB; feed fetch loop
   bounded to `SCRAPE_BATCH = 4` concurrent fetches.
+- **More outlets (8 → 18)** — added France 24, DW, Sky News, CNBC, The Verge,
+  ABC News, NBC News, USA Today, The Independent and Politico to `sources`
+  (with direct RSS endpoints, suffix stripping and test stubs). More outlets →
+  more cross-outlet story overlap, so clustering produces more stories across
+  more categories (world/business/tech in particular).
+- **Frontend tone + status colors** — the framing status stamp is now
+  green for `FRAMED` (alarm-red for `FAILED`, dashed for `PENDING`) instead of
+  the generic acid-yellow stamp, and each tone has its own color
+  (`celebratory` green, `analytical` cyan, `urgent` orange, `skeptical`
+  purple, `alarmist` red, `neutral` plain) instead of sharing yellow/white.
+- **Frontend card cleanup** — the `FRAMED`/`FAILED`/`PENDING` status badge is
+  removed from the story cards **and the story modal** (the modal header now
+  shows category + count + time only).
+- **Frontend modal theme colors** — structural elements in the story modal now
+  take the story's **category color** instead of the acid accent: section
+  header stamps (`How the coverage differs`, `Tone by outlet`, `The news,
+  outlet by outlet`) and `READ FULL ARTICLE →` buttons use the category fill
+  (e.g. purple for Culture & Sport, red for Crime & Justice); the `The story`
+  summary box is a category-colored slab with an ink offset shadow.
+- **Frontend "new since your last visit"** — a persisted watermark (newest
+  acknowledged `seenAt`, stored in `localStorage`) badges stories that
+  appeared since the previous visit with a `NEW` stamp on the card and an
+  acid "N new stories — click to mark read" chip above the filters. The
+  watermark advances only on manual refresh, so stories that arrive while
+  the page is open stay badged until the user acknowledges them; a
+  first-ever visit shows no banner.
 
 ## [1.0.0] - 2026-08-15
 
