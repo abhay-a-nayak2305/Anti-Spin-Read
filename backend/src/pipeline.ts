@@ -11,10 +11,11 @@ const FRAMING_CONCURRENCY = 3;
 const RETRY_BATCH = 50;
 // Workers free plan caps outbound requests at 50 per invocation. One run
 // spends ~18-22 on RSS (a redirected direct feed costs 2: direct + Google
-// News fallback), so enrichment and framing share the rest: ENRICH_BATCH
-// × 1 hop + FRAMING_BATCH × 5 (3 primary + 2 fallback attempts, worst
-// case) ≤ ~28 → 8 + 15 = 23, leaving ~5 subrequests of margin.
+// News fallback), so enrichment and framing share the rest:
+// (ENRICH_BATCH + ENRICH_CATCHUP) × 1 hop + FRAMING_BATCH × 5 (3 primary +
+// 2 fallback attempts, worst case) → 12 + 15 = 27, ~45-49 total.
 const ENRICH_BATCH = 8;
+const ENRICH_CATCHUP = 4;
 const FRAMING_BATCH = 3;
 const RETENTION_DAYS = 14;
 const RUNS_RETENTION_DAYS = 90; // pipeline_runs log is bound separately
@@ -156,6 +157,11 @@ export async function runPipeline(
     // invocation budget. Uncapped articles are retried next run.
     const toEnrich = [...new Set(clusters.flat())].slice(0, ENRICH_BATCH);
     const enriched = await enrich(db, toEnrich);
+
+    // 2c. Enrichment catch-up: older clusters' articles that still lack an
+    // image (formed before enrichment existed, or publishers that blocked
+    // the first attempt). Bounded to the subrequest budget.
+    await enrich(db, await db.articlesInClustersMissingImages(ENRICH_CATCHUP));
 
     // 3. Collect clusters that still need framing: new ones first (create
     // the row now so re-runs don't reframe them), then previously failed

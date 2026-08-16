@@ -318,6 +318,29 @@ console.log("== test: recentUnclusteredArticles clustering pool ==");
   check("limit honored", capped.length === 1 && capped[0].title === "Fresh unclustered");
 }
 
+console.log("== test: articlesInClustersMissingImages catch-up queue ==");
+{
+  const { db } = makeDb();
+  const now = new Date();
+  await db.insertArticles([
+    art("BBC", "No image clustered", new Date(now.getTime() - 60_000)),
+    art("CNN", "Has image clustered", new Date(now.getTime() - 120_000)),
+    art("BBC", "No image unclustered", new Date(now.getTime() - 180_000)),
+  ]);
+  const clustered = [art("BBC", "No image clustered", now), art("CNN", "Has image clustered", now)];
+  await seedCluster(db, clustered, now, "sig-img");
+  await db.setArticleImage("CNN|Has image clustered", "https://img.example/x.jpg");
+
+  const queue = await db.articlesInClustersMissingImages(10);
+  const titles = queue.map((a) => a.title);
+  check("clustered article without image queued", titles.includes("No image clustered"));
+  check("clustered article WITH image not queued", !titles.includes("Has image clustered"));
+  check("unclustered article not queued", !titles.includes("No image unclustered"));
+
+  const capped = await db.articlesInClustersMissingImages(1);
+  check("limit honored", capped.length === 1);
+}
+
 console.log("== test: meta upsert ==");
 {
   const { db } = makeDb();

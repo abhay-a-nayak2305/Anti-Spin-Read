@@ -32,6 +32,14 @@ export class MemoryDb implements Db {
     return inserted;
   }
 
+  async articlesInClustersMissingImages(limit: number): Promise<RawArticle[]> {
+    const referenced = new Set(this.clusters.flatMap((c) => c.articleKeys));
+    return [...this.articles.values()]
+      .filter((a) => referenced.has(a.dedupKey) && !a.imageUrl)
+      .sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime())
+      .slice(0, limit);
+  }
+
   async recentArticles(since: Date): Promise<RawArticle[]> {
     return [...this.articles.values()]
       .filter((a) => a.publishedAt >= since)

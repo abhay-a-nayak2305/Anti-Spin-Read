@@ -18,6 +18,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recent unclustered pool** (48h window, `recentUnclusteredArticles`, with a
   wider 128-cluster temporal window to reach stories published hours apart).
   Once formed, a cluster's articles leave the pool, so nothing re-creates.
+- **Framing burst vs the free-plan subrequest budget.** The pool surfaced
+  43 clusters in one run and the Workers free plan (50 outbound requests
+  per invocation) failed every Gemini call with "Too many subrequests".
+  Enrichment now uses `redirect: "manual"` (a redirect hop counts as a
+  subrequest; news URLs chain 2–3), the scraper does the same for feeds
+  (3xx → Google News fallback, 1 hop), and per-run batches are budgeted:
+  `ENRICH_BATCH=8`, `ENRICH_CATCHUP=4`, `FRAMING_BATCH=3` (worst case
+  ~45–49 of 50). Framing drains 3 clusters per run through the retry queue.
+- **Redirecting direct feeds regressed to Google News titles.** With
+  redirects no longer followed, 4 feeds (The Hill 308, Guardian/ABC/
+  Al Jazeera 301) silently fell back to Google News, whose titles differ
+  from the direct feed's — 457 near-duplicate articles and duplicate
+  clusters. The feeds now point at their post-redirect canonical URLs
+  (verified live), and the duplicate rows were purged.
+- **Older stories showed no image.** Clusters formed before/without
+  enrichment never got og:images. Backfilled via
+  `scripts/backfill-images.ts` (local run against the D1 REST API), and
+  the pipeline now runs a per-run enrichment catch-up
+  (`articlesInClustersMissingImages`) so no cluster-referenced article
+  stays image-less forever.
 - **Unbounded pipeline run log** — `pipeline_runs` kept one row per 15-min
   run forever (~35k rows/year). The daily retention purge now also drops
   run-log rows older than 90 days (`RUNS_RETENTION_DAYS`), so every table

@@ -17,6 +17,14 @@ export interface Db {
    * after the first; those late articles must still cluster.
    */
   recentUnclusteredArticles(since: Date, limit: number): Promise<RawArticle[]>;
+  /**
+   * Cluster-referenced articles that still lack an og:image — the
+   * enrichment catch-up queue. New clusters are enriched in the run that
+   * creates them; this covers older clusters (e.g. formed before
+   * enrichment existed) and articles whose publisher blocked the first
+   * attempt. Bounded per run to the subrequest budget.
+   */
+  articlesInClustersMissingImages(limit: number): Promise<RawArticle[]>;
   /** Has any framed cluster already used one of these article keys? */
   clusterExistsWithFraming(keys: string[]): Promise<boolean>;
   /**
@@ -138,6 +146,20 @@ export class D1Db implements Db {
       });
     });
     return inserted;
+  }
+
+  async articlesInClustersMissingImages(limit: number): Promise<RawArticle[]> {
+    const { results } = await this.env
+      .prepare(
+        `SELECT DISTINCT a.${ARTICLE_COLS.replaceAll(", ", ", a.")} FROM articles a
+         JOIN cluster_articles ca ON ca.dedup_key = a.dedup_key
+         WHERE a.image_url = ''
+         ORDER BY a.published_at DESC
+         LIMIT ?`
+      )
+      .bind(limit)
+      .all();
+    return results.map(toRaw);
   }
 
   async recentArticles(since: Date): Promise<RawArticle[]> {
