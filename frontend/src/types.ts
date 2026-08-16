@@ -62,6 +62,8 @@ export interface CategoryMeta {
   stamp: string;
   /** colored offset shadow for cards / modal */
   shadow: string;
+  /** card/panel outline color (overrides the .slab ink border) */
+  border: string;
   /** accent text color */
   text: string;
   /** solid fill (bg + readable text) for modal blocks — category-colored */
@@ -86,6 +88,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     label: "Politics",
     stamp: "bg-cat-politics text-ink border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-politics)]",
+    border: "border-ink",
     text: "text-cat-politics",
     fill: "bg-cat-politics text-ink",
     selection: "var(--color-cat-politics)",
@@ -94,6 +97,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     label: "World",
     stamp: "bg-cat-world text-ink border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-world)]",
+    border: "border-ink",
     text: "text-cat-world",
     fill: "bg-cat-world text-ink",
     selection: "var(--color-cat-world)",
@@ -102,6 +106,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     label: "Business",
     stamp: "bg-cat-business text-ink border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-business)]",
+    border: "border-ink",
     text: "text-cat-business",
     fill: "bg-cat-business text-ink",
     selection: "var(--color-cat-business)",
@@ -110,6 +115,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     label: "Tech",
     stamp: "bg-cat-tech text-ink border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-tech)]",
+    border: "border-ink",
     text: "text-cat-tech",
     fill: "bg-cat-tech text-ink",
     selection: "var(--color-cat-tech)",
@@ -118,6 +124,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     label: "Science & Health",
     stamp: "bg-cat-science text-ink border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-science)]",
+    border: "border-ink",
     text: "text-cat-science",
     fill: "bg-cat-science text-ink",
     selection: "var(--color-cat-science)",
@@ -126,6 +133,7 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     label: "Crime & Justice",
     stamp: "bg-cat-crime text-paper border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-crime)]",
+    border: "border-ink",
     text: "text-cat-crime",
     fill: "bg-cat-crime text-paper",
     selection: "var(--color-cat-crime)",
@@ -134,17 +142,22 @@ export const CATEGORY_META: Record<CategoryId, CategoryMeta> = {
     label: "Culture & Sport",
     stamp: "bg-cat-culture text-ink border-ink",
     shadow: "shadow-[8px_8px_0_var(--color-cat-culture)]",
+    border: "border-ink",
     text: "text-cat-culture",
     fill: "bg-cat-culture text-ink",
     selection: "var(--color-cat-culture)",
   },
   other: {
     label: "Other",
-    stamp: "bg-paper text-ink border-ink border-dashed",
-    shadow: "shadow-[8px_8px_0_var(--color-ink)]",
+    // White theme: solid white outline + white offset shadow (the old ink
+    // outline and shadow were invisible against the black page) and a
+    // white selection highlight. The stamp keeps its white fill.
+    stamp: "bg-paper text-ink border-paper",
+    shadow: "shadow-[8px_8px_0_var(--color-paper)]",
+    border: "border-paper",
     text: "text-paper",
     fill: "bg-paper text-ink",
-    selection: "var(--color-acid)",
+    selection: "var(--color-paper)",
   },
 };
 

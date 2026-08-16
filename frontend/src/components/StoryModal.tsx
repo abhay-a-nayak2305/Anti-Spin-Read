@@ -152,7 +152,7 @@ export function StoryModal({
       <div
         ref={panelRef}
         tabIndex={-1}
-        className={`modal-panel slab bg-paper outline-none ${meta.shadow}`}
+        className={`modal-panel slab bg-paper outline-none ${meta.shadow} ${meta.border}`}
         style={{ "--cat": meta.selection } as React.CSSProperties}
       >
         {/* header */}

@@ -26,7 +26,7 @@ export function StoryCard({
 
   return (
     <article
-      className={`story-card slab flex flex-col bg-paper ${meta.shadow}`}
+      className={`story-card slab flex flex-col bg-paper ${meta.shadow} ${meta.border}`}
       style={{ "--cat": meta.selection } as React.CSSProperties}
     >
       {/* clickable image — the hero always renders: og:image when present,

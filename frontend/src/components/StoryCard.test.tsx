@@ -64,4 +64,14 @@ describe("StoryCard", () => {
     expect(img!.getAttribute("src")).toContain("bbc.co.uk/favicon.ico");
     expect(screen.queryByText("NO IMAGE")).not.toBeInTheDocument();
   });
+
+  it("outlines OTHER cards in white (visible on the black page)", () => {
+    const { container } = render(
+      <StoryCard cluster={{ ...cluster, category: "other" }} onOpen={vi.fn()} />
+    );
+    const card = container.querySelector(".story-card");
+    expect(card!.className).toContain("border-paper");
+    expect(card!.className).toContain("shadow-[8px_8px_0_var(--color-paper)]");
+    expect(card!.className).not.toContain("border-ink");
+  });
 });

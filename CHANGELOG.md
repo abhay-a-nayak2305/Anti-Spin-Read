@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   color (each card/panel sets `--cat` from `categoryMeta().selection`);
   the acid-yellow selection remains only on chrome — header, ticker,
   filters.
+- **OTHER cards get a white theme.** The "Other" category's ink outline
+  and ink offset shadow were invisible against the black page; both are
+  white now (solid `border-paper` outline + white offset shadow), the
+  stamp's dashed border is gone, and text selection highlights white.
 
 ### Fixed
 
