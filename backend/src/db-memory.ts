@@ -141,8 +141,9 @@ export class MemoryDb implements Db {
   private meta = new Map<string, string>();
 
   async purgeOldData(
-    cutoffMs: number
-  ): Promise<{ clusters: number; articles: number }> {
+    cutoffMs: number,
+    runsCutoffMs: number
+  ): Promise<{ clusters: number; articles: number; runs: number }> {
     let clusters = 0;
     const before = this.clusters.length;
     this.clusters = this.clusters.filter((c) => c.seenAt.getTime() >= cutoffMs);
@@ -159,7 +160,12 @@ export class MemoryDb implements Db {
         articles++;
       }
     }
-    return { clusters, articles };
+
+    let runs = 0;
+    const runsBefore = this.runs.length;
+    this.runs = this.runs.filter((r) => r.startedAt.getTime() >= runsCutoffMs);
+    runs = runsBefore - this.runs.length;
+    return { clusters, articles, runs };
   }
 
   async getMeta(key: string): Promise<string | null> {

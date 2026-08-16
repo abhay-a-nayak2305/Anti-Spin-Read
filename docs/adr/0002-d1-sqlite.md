@@ -77,6 +77,10 @@ changes are versioned SQL files in `backend/migrations/` (0001–0005).
     (cluster_articles reference)` — removes orphans only; **recent**
     unreferenced articles stay, because a late-arriving second outlet may
     still cluster with them next run.
+  - `DELETE FROM pipeline_runs WHERE started_at < runs_cutoff` — the event
+    log is bound separately with a **90-day retention**
+    (`RUNS_RETENTION_DAYS`), so the one-row-per-run table (~35k rows/year)
+    cannot grow without bound.
 - **Rate-limited maintenance:** `runMaintenance` runs as the last step of each
   pipeline run but executes the purge at most once per 24h
   (`MAINTENANCE_INTERVAL_MS`), gated by `meta.last_purge_ms`

@@ -1,4 +1,4 @@
-import { runPipeline } from "../src/pipeline.js";
+import { runPipeline, runMaintenance } from "../src/pipeline.js";
 import { MemoryDb } from "../src/db-memory.js";
 import type { Env, IFraming, RawArticle } from "../src/types.js";
 import type { ClusteredArticle } from "../src/cluster.js";
@@ -182,6 +182,38 @@ console.log("== test: single-article articles never framed ==");
   });
   check("no clusters, no framings", result.clusters === 0 && result.framed === 0);
   check("no rows created", db.clusters.length === 0);
+}
+
+console.log("== test: runMaintenance purges old run-log rows (MemoryDb parity) ==");
+{
+  const db = new MemoryDb();
+  const runsCutoff = Date.now() - 90 * 24 * 3600_000;
+  const mkRun = (startedAt: Date) => ({
+    startedAt,
+    finishedAt: startedAt,
+    scraped: 1,
+    newArticles: 0,
+    clusters: 0,
+    framed: 0,
+    failed: 0,
+    skipped: 0,
+    error: null,
+  });
+  await db.recordPipelineRun(mkRun(new Date(runsCutoff - 3600_000)));
+  await db.recordPipelineRun(mkRun(new Date(runsCutoff + 3600_000)));
+
+  // First call: maintenance is due (no marker) and purges the old row.
+  const purged = await runMaintenance(db);
+  check("old run purged by runMaintenance", purged !== null && purged.runs === 1, JSON.stringify(purged));
+  check("cluster/article counts zero", purged !== null && purged.clusters === 0 && purged.articles === 0);
+
+  const runs = await db.latestPipelineRuns(10);
+  check("recent run kept", runs.length === 1 && runs[0].startedAt.getTime() > runsCutoff);
+  check("old run gone from log", !runs.some((r) => r.startedAt.getTime() < runsCutoff));
+
+  // Second call within 24h: rate-limited, nothing to report.
+  const skipped = await runMaintenance(db);
+  check("second maintenance within 24h skipped", skipped === null);
 }
 
 console.log("\n=====================");

@@ -244,11 +244,12 @@ console.log("== test: purgeOldData retention ==");
   // Recent orphan article with NO cluster (kept — may cluster later)
   await db.insertArticles([art("NPR", "Recent orphan", fresh)]);
 
-  const purged = await db.purgeOldData(cutoff);
+  const purged = await db.purgeOldData(cutoff, cutoff);
   check("old cluster purged", purged.clusters === 1);
   // The cluster DELETE ran first, so its two articles became unreferenced
   // within the same call and were purged alongside the old orphan: 3 total.
   check("old orphan + cascade-orphaned articles purged", purged.articles === 3);
+  check("no run-log rows in this block", purged.runs === 0);
 
   const clusters = await db.latestClusters(10);
   check("fresh cluster survives", clusters.length === 1 && clusters[0].keyPhrase === "Cluster");
@@ -256,8 +257,40 @@ console.log("== test: purgeOldData retention ==");
   const keys = recent.map((a) => a.title);
   check("recent orphan kept", keys.includes("Recent orphan"));
   check("old orphan gone", !keys.includes("Old orphan"));
-  const purged2 = await db.purgeOldData(cutoff);
-  check("second purge removes nothing", purged2.clusters === 0 && purged2.articles === 0);
+  const purged2 = await db.purgeOldData(cutoff, cutoff);
+  check("second purge removes nothing", purged2.clusters === 0 && purged2.articles === 0 && purged2.runs === 0);
+}
+
+console.log("== test: pipeline run log retention (90d) ==");
+{
+  const { db } = makeDb();
+  const runsCutoff = Date.now() - 90 * 24 * 3600_000;
+  const oldRun = new Date(runsCutoff - 3600_000);
+  const recentRun = new Date(runsCutoff + 3600_000);
+
+  const mkRun = (startedAt: Date) => ({
+    startedAt,
+    finishedAt: startedAt,
+    scraped: 120,
+    newArticles: 30,
+    clusters: 4,
+    framed: 3,
+    failed: 1,
+    skipped: 0,
+    error: null,
+  });
+  await db.recordPipelineRun(mkRun(oldRun));
+  await db.recordPipelineRun(mkRun(recentRun));
+
+  const purged = await db.purgeOldData(runsCutoff, runsCutoff);
+  check("old run-log row purged", purged.runs === 1);
+
+  const runs = await db.latestPipelineRuns(10);
+  check("recent run kept", runs.length === 1 && runs[0].startedAt.getTime() === recentRun.getTime());
+  check("old run gone", !runs.some((r) => r.startedAt.getTime() === oldRun.getTime()));
+
+  const purged2 = await db.purgeOldData(runsCutoff, runsCutoff);
+  check("second purge removes no run rows", purged2.runs === 0);
 }
 
 console.log("== test: meta upsert ==");

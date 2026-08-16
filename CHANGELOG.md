@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Unbounded pipeline run log** — `pipeline_runs` kept one row per 15-min
+  run forever (~35k rows/year). The daily retention purge now also drops
+  run-log rows older than 90 days (`RUNS_RETENTION_DAYS`), so every table
+  in D1 is bounded: 14 days for clusters/articles, 90 days for the log.
 - **Pipeline hard-kill on production (`exceededResources`)** — scheduled runs
   were being killed by the platform mid-scrape (after the feed batch, ~20 ms
   CPU, no run row, no lock release). Root cause: up to 8 feed fetches fired in

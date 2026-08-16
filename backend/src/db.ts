@@ -49,13 +49,16 @@ export interface Db {
   /** Release the lock only if this run still owns it */
   releasePipelineLock(token: string): Promise<void>;
   /**
-   * Delete clusters (and their cluster_articles via FK cascade) whose
-   * seen_at is older than cutoffMs, plus articles that are no longer
-   * referenced by any cluster. Returns rows deleted per table.
+   * Retention purge: delete clusters (and their cluster_articles via FK
+   * cascade) whose seen_at is older than cutoffMs, articles that are no
+   * longer referenced by any cluster and older than cutoffMs, and pipeline
+   * run log rows older than runsCutoffMs (the run log has its own, longer
+   * retention). Returns rows deleted per table.
    */
   purgeOldData(
-    cutoffMs: number
-  ): Promise<{ clusters: number; articles: number }>;
+    cutoffMs: number,
+    runsCutoffMs: number
+  ): Promise<{ clusters: number; articles: number; runs: number }>;
   /** Maintenance state (retention timestamps, job markers). */
   getMeta(key: string): Promise<string | null>;
   setMeta(key: string, value: string): Promise<void>;
@@ -360,7 +363,10 @@ export class D1Db implements Db {
       .run();
   }
 
-  async purgeOldData(cutoffMs: number): Promise<{ clusters: number; articles: number }> {
+  async purgeOldData(
+    cutoffMs: number,
+    runsCutoffMs: number
+  ): Promise<{ clusters: number; articles: number; runs: number }> {
     // Clusters cascade to cluster_articles via the FK. Articles that are
     // both older than the cutoff AND no longer referenced by any cluster
     // are orphans — remove them too so the articles table doesn't grow
@@ -380,9 +386,16 @@ export class D1Db implements Db {
       )
       .bind(cutoffMs)
       .run();
+    // The run event log keeps a row per 15-minute run forever otherwise
+    // (~35k rows/year) — bound it with its own longer retention.
+    const runsRes = await this.env
+      .prepare("DELETE FROM pipeline_runs WHERE started_at < ?")
+      .bind(runsCutoffMs)
+      .run();
     return {
       clusters: clusterRes.meta.changes ?? 0,
       articles: articleRes.meta.changes ?? 0,
+      runs: runsRes.meta.changes ?? 0,
     };
   }
 

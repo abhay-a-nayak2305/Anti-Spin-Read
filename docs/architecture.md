@@ -37,7 +37,7 @@ Everything runs on Cloudflare's free tier:
 │    5. frame: Gemini with responseSchema + model fallback            │
 │        · framing JSON validated by normalizeFraming (framing-schema)│
 │        · failures recorded, retried from queue (3+2 attempts)       │
-│    6. maintain: 14-day retention purge, ≤ once per 24h              │
+│    6. maintain: 14-day retention purge (+90d run log), ≤ once per 24h   │
 │        · gated by meta.last_purge_ms (migration 0004)               │
 │    7. record: pipeline_runs event log row (migration 0005)          │
 │                                                                     │
@@ -92,10 +92,12 @@ One full run: `scrape → dedup/insert → cluster → enrich → frame → main
    cluster joins the retry queue (`clustersNeedingFraming`, oldest first,
    batch of 50) for the next run.
 6. **Maintain.** Retention purge: clusters older than 14 days are deleted
-   (cascading `cluster_articles` via FK), and articles older than the cutoff
-   that are no longer referenced by any cluster are removed as orphans.
-   Executed at most once per 24h, gated by `meta.last_purge_ms` (migration
-   0004) — maintenance is rate-limited by the meta table, not by clock time.
+   (cascading `cluster_articles` via FK), articles older than the cutoff
+   that are no longer referenced by any cluster are removed as orphans, and
+   `pipeline_runs` rows older than 90 days are dropped (the run log has its
+   own longer retention so it stays bounded too). Executed at most once per
+   24h, gated by `meta.last_purge_ms` (migration 0004) — maintenance is
+   rate-limited by the meta table, not by clock time.
 7. **Record.** One row per run (success *or* failure) is appended to
    `pipeline_runs` (migration 0005), surfaced via `GET /api/runs`.
 
@@ -170,9 +172,9 @@ on read** (`parseFraming` skips corrupt rows at query time — never served).
 - **Pipeline event log in D1** (`pipeline_runs`) — success and failure rows,
   exposed via `GET /api/runs`; `recordRun` failures are logged and never crash
   the pipeline.
-- **Retention** — 14 days of clusters/articles in D1; the event log is
-  currently unbounded (free tier: 5M rows read/day, 1M writes/day — a row per
-  15 minutes is negligible).
+- **Retention** — 14 days of clusters/articles in D1, 90 days of
+  `pipeline_runs`; every table is bounded (free tier: 5M rows read/day, 1M
+  writes/day — a row per 15 minutes is negligible).
 
 ## Related docs
 

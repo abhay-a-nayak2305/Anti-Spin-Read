@@ -10,6 +10,7 @@ import type { ClusteredArticle } from "./cluster.js";
 const FRAMING_CONCURRENCY = 3;
 const RETRY_BATCH = 50;
 const RETENTION_DAYS = 14;
+const RUNS_RETENTION_DAYS = 90; // pipeline_runs log is bound separately
 const MAINTENANCE_INTERVAL_MS = 24 * 3600_000;
 const PURGE_META_KEY = "last_purge_ms";
 
@@ -58,13 +59,14 @@ interface PendingFraming {
 
 /**
  * Maintenance chores piggybacked on pipeline runs but rate-limited by the
- * meta table: purge clusters + orphan articles older than RETENTION_DAYS,
- * at most once per MAINTENANCE_INTERVAL_MS. Returns what was purged, or
- * null when maintenance isn't due yet.
+ * meta table: purge clusters + orphan articles older than RETENTION_DAYS
+ * and run-log rows older than RUNS_RETENTION_DAYS, at most once per
+ * MAINTENANCE_INTERVAL_MS. Returns what was purged, or null when
+ * maintenance isn't due yet.
  */
 export async function runMaintenance(
   db: Db
-): Promise<{ clusters: number; articles: number } | null> {
+): Promise<{ clusters: number; articles: number; runs: number } | null> {
   const last = await db.getMeta(PURGE_META_KEY);
   const lastMs = last ? Number(last) : 0;
   const now = Date.now();
@@ -72,7 +74,8 @@ export async function runMaintenance(
     return null;
   }
   const cutoff = now - RETENTION_DAYS * 24 * 3600_000;
-  const purged = await db.purgeOldData(cutoff);
+  const runsCutoff = now - RUNS_RETENTION_DAYS * 24 * 3600_000;
+  const purged = await db.purgeOldData(cutoff, runsCutoff);
   await db.setMeta(PURGE_META_KEY, String(now));
   return purged;
 }
@@ -180,7 +183,7 @@ export async function runPipeline(
     const purged = await runMaintenance(db);
     if (purged) {
       console.log(
-        `[pipeline] maintenance: purged ${purged.clusters} clusters, ${purged.articles} orphan articles`
+        `[pipeline] maintenance: purged ${purged.clusters} clusters, ${purged.articles} orphan articles, ${purged.runs} run log rows`
       );
     }
 
