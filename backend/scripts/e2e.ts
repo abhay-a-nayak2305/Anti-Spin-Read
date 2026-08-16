@@ -14,11 +14,15 @@ import type { Env, PipelineResult } from "../src/types.js";
 //  - Headlines shift between the two runs, so a handful of genuinely-new
 //    articles may legitimately appear on the second run; a small drift is
 //    accepted, while a drop in articles or drift beyond tolerance still
-//    fails (that would signal a real dedup regression).
+//    fails (that would signal a real dedup regression). The drift budget
+//    scales with the stored pool (3%, floor 5): live feeds churn ~1-2%
+//    between runs even a few seconds apart, and the pool grew to 18 outlets
+//    (~500+ items), while a broken dedup re-stores everything (~100%).
 
 const SCRAPE_ATTEMPTS = 3;
 const SCRAPE_RETRY_DELAY_MS = 5_000;
-const HEADLINE_DRIFT_TOLERANCE = 5;
+const DRIFT_RATE = 0.03; // fraction of the stored pool, floor DRIFT_FLOOR
+const DRIFT_FLOOR = 5;
 
 const env = { GEMINI_API_KEY: "", CRON_SECRET: "e2e-secret", DB: {} } as Env;
 
@@ -60,12 +64,13 @@ async function main() {
   console.log("run2:", JSON.stringify(r2));
 
   const drift = db.articles.size - articles;
+  const driftBudget = Math.max(DRIFT_FLOOR, Math.round(articles * DRIFT_RATE));
   if (drift < 0) {
     throw new Error(`FAIL: idempotency broken — articles decreased (${articles} -> ${db.articles.size})`);
   }
-  if (drift > HEADLINE_DRIFT_TOLERANCE) {
+  if (drift > driftBudget) {
     throw new Error(
-      `FAIL: idempotency broken — ${drift} new articles appeared between runs (tolerance ${HEADLINE_DRIFT_TOLERANCE})`
+      `FAIL: idempotency broken — ${drift} new articles appeared between runs (budget ${driftBudget})`
     );
   }
   if (drift > 0) {
