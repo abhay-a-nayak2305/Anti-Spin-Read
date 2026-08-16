@@ -29,19 +29,17 @@ export function StoryCard({
       className={`story-card slab flex flex-col bg-paper ${meta.shadow}`}
       style={{ "--cat": meta.selection } as React.CSSProperties}
     >
-      {/* clickable image (or NO-IMAGE placeholder when the article has none) */}
+      {/* clickable image — the hero always renders: og:image when present,
+          otherwise the favicon / letter-monogram fallback chain, so every
+          story card shows an image even when enrichment found nothing */}
       <button
         type="button"
         onClick={() => onOpen(cluster)}
         aria-label={`Open details: ${cluster.keyPhrase}`}
         className="block w-full border-b-2 border-ink text-left group"
       >
-        <div className={hero?.imageUrl ? "relative overflow-hidden" : "relative"}>
-          {hero?.imageUrl ? (
-            <HeroImage src={hero.imageUrl} site={hero.url} eager={eager} />
-          ) : (
-            <div className="no-img aspect-video text-2xl">NO IMAGE</div>
-          )}
+        <div className="relative">
+          <HeroImage src={hero?.imageUrl ?? ""} site={hero?.url ?? ""} eager={eager} />
           <span className="absolute top-2 right-2 border-2 border-ink bg-ink px-1.5 py-0.5 font-display text-[10px] uppercase text-paper opacity-0 transition-opacity group-hover:opacity-100">
             Read →
           </span>

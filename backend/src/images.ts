@@ -252,8 +252,11 @@ export async function fetchOgImage(
       redirect: "manual",
       signal: controller.signal,
       headers: {
+        // A browser-like UA: several outlets (The Hill, Sky News, DW …)
+        // return 403 to non-browser UAs; og:image is public page metadata,
+        // the same bytes a visitor's browser would read.
         "User-Agent":
-          "Mozilla/5.0 (compatible; AntiSpinRead/1.0; +https://github.com/anti-spin-read)",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
       },
     });
     if (!res.ok) return "";

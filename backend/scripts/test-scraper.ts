@@ -1,4 +1,4 @@
-import { scrapeAll, stripOutletSuffix, hashText } from "../src/scraper.js";
+import { extractFeedImage, scrapeAll, stripOutletSuffix, hashText } from "../src/scraper.js";
 import { sources } from "../src/config.js";
 
 // Scraper unit tests with a stubbed fetch: feed validation, title/lede
@@ -128,6 +128,85 @@ console.log("== test: stripOutletSuffix unit cases ==");
     stripOutletSuffix("AP News reports the story AP News", "AP") ===
       "AP News reports the story"
   );
+}
+
+console.log("== test: extractFeedImage (feed-carried images, SSRF-gated) ==");
+{
+  check(
+    "google thumbnail <img> extracted + entities decoded",
+    extractFeedImage({
+      content:
+        '<a href="https://news.google.com/rss/articles/x"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT-xz&amp;usqp=CAU" alt=""></a>',
+    }) === "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT-xz&usqp=CAU"
+  );
+  check(
+    "media:content url attribute used",
+    extractFeedImage({ "media:content": [{ $: { url: "https://thehill.com/wp-content/uploads/x.jpg" } }] }) ===
+      "https://thehill.com/wp-content/uploads/x.jpg"
+  );
+  check(
+    "enclosure url used",
+    extractFeedImage({ enclosure: { url: "https://sky.example/pic.jpg", type: "image/jpeg" } }) ===
+      "https://sky.example/pic.jpg"
+  );
+  check(
+    "private-network img rejected (SSRF)",
+    extractFeedImage({ content: '<img src="http://192.168.1.1/steal.jpg">' }) === ""
+  );
+  check(
+    "non-http scheme rejected",
+    extractFeedImage({ content: '<img src="file:///etc/passwd">' }) === ""
+  );
+  check(
+    "contentSnippet (tags already stripped) yields nothing",
+    extractFeedImage({ contentSnippet: "plain text no tags" }) === ""
+  );
+  check(
+    "no image anywhere -> empty",
+    extractFeedImage({ content: "no img here", enclosure: undefined }) === ""
+  );
+}
+
+console.log("== test: feed image lands on the article end-to-end ==");
+{
+  stubFetch(
+    "BBC",
+    feedXml(
+      item(
+        "Markets rally on rate cut hopes - BBC",
+        "https://bbc.example/a",
+        "Wed, 14 Aug 2026 10:00:00 GMT",
+        "<![CDATA[<img src=\"https://bbc.example/img.jpg\" />Investors cheered the news BBC]]>"
+      )
+    )
+  );
+  const articles = await scrapeAll(48);
+  check("one article parsed (others empty)", articles.length === 1);
+  if (articles[0]) {
+    check("imageUrl from feed <img>", articles[0].imageUrl === "https://bbc.example/img.jpg");
+    check("lede still cleaned (img tag not in lede)", articles[0].lede === "Investors cheered the news");
+  }
+  restoreFetch();
+}
+
+console.log("== test: unsafe feed image never stored ==");
+{
+  stubFetch(
+    "BBC",
+    feedXml(
+      item(
+        "Markets rally on rate cut hopes - BBC",
+        "https://bbc.example/a",
+        "Wed, 14 Aug 2026 10:00:00 GMT",
+        "<![CDATA[<img src=\"http://169.254.169.254/latest/meta-data\" />Investors cheered the news BBC]]>"
+      )
+    )
+  );
+  const articles = await scrapeAll(48);
+  if (articles[0]) {
+    check("metadata-endpoint img rejected", articles[0].imageUrl === "");
+  }
+  restoreFetch();
 }
 
 console.log("== test: title/lede cleanup via live-shaped RSS ==");

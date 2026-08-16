@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Every story card now shows an image.** Cards whose articles have no
+  og:image used to render a bare "NO IMAGE" box; the hero now always runs
+  the privacy-preserving fallback chain (og:image → site favicon →
+  letter monogram, with the stripe pattern showing through at 30% in
+  fallback states), so every cluster displays an image and the box is
+  never empty. Zero extra requests — the browser fetches the favicon
+  directly from the outlet.
+- **Feed-carried images are captured at scrape time.** Google News embeds
+  a thumbnail `<img>` in item descriptions and several direct feeds ship
+  `<media:content>`/`<enclosure>` (The Hill, Sky News, …) — previously all
+  discarded by the tag stripper. The scraper now extracts them
+  (`extractFeedImage`, SSRF-gated through `isSafeHttpUrl`) into
+  `imageUrl`, so those articles never need an og:image fetch at all.
+- **og:image fetches send a browser-like UA.** The Hill, Sky News, DW and
+  others return 403 to the previous `AntiSpinRead/1.0` bot UA; og:image is
+  public page metadata, so the fetcher now identifies as a stock Chrome UA.
+  The catch-up retries the backlogged articles with the new UA.
 - **Text selection follows the story's theme.** Highlighting text on a
   story card or in the modal now highlights with that story's category
   color (each card/panel sets `--cat` from `categoryMeta().selection`);

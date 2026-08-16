@@ -1,5 +1,6 @@
 import Parser from "rss-parser";
 import { sources } from "./config.js";
+import { isSafeHttpUrl } from "./images.js";
 import type { RawArticle } from "./types.js";
 
 const parser = new Parser({ timeout: 15000 });
@@ -51,9 +52,9 @@ const ENTITIES: Record<string, string> = {
   "&#8212;": "—",
 };
 
-function stripHtml(html: string): string {
-  let out = html
-    .replace(/<[^>]*>/g, " ")
+/** Decode XML/HTML entities (named + numeric) in a string. */
+function decodeEntities(s: string): string {
+  let out = s
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) =>
       String.fromCodePoint(parseInt(hex, 16))
     )
@@ -61,7 +62,44 @@ function stripHtml(html: string): string {
   for (const [entity, replacement] of Object.entries(ENTITIES)) {
     out = out.split(entity).join(replacement);
   }
-  return out.replace(/\s+/g, " ").trim();
+  return out;
+}
+
+function stripHtml(html: string): string {
+  return decodeEntities(html.replace(/<[^>]*>/g, " "))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Best-effort image from a feed item, checked in order:
+ * 1. `<img src="…">` inside the raw content (Google News embeds a thumbnail
+ *    in the description; URLs are entity-encoded).
+ * 2. `<media:content url="…">` (The Hill, Sky News …) — via rss-parser's
+ *    namespaced element, attribute in `$`.
+ * 3. `<enclosure url="…">`.
+ *
+ * Only an https/http public URL survives (isSafeHttpUrl) — feed-supplied
+ * URLs are untrusted input and must pass the same SSRF gate as og:image
+ * URLs. Returns "" when the feed carries no usable image; the pipeline's
+ * enrichment (or catch-up) then tries the page's og:image instead.
+ */
+export function extractFeedImage(item: Record<string, unknown>): string {
+  const raw = String(item.content ?? item.contentSnippet ?? "");
+  const img = raw.match(/<img[^>]+src=["']([^"']+)["']/i);
+  let url = img ? decodeEntities(img[1]) : "";
+  if (!url) {
+    const mc = item["media:content"];
+    const mcFirst = Array.isArray(mc) ? mc[0] : mc;
+    const mcUrl = (mcFirst as { $?: { url?: string }; url?: string } | undefined)?.$?.url ??
+      (mcFirst as { url?: string } | undefined)?.url;
+    if (mcUrl) {
+      url = String(mcUrl);
+    } else {
+      url = String((item.enclosure as { url?: string } | undefined)?.url ?? "");
+    }
+  }
+  return isSafeHttpUrl(url) ? url : "";
 }
 
 /** Direct RSS feed URLs for each outlet (official, public RSS endpoints).
@@ -269,7 +307,10 @@ async function scrapeSource(
     // in the text ("&lt;no&gt;") are destroyed. Raw content keeps them
     // encoded, and stripHtml below handles tags + entities in the right
     // order. Google News sends short snippets in both fields.
-    const rawLede = stripHtml(item.content ?? item.contentSnippet ?? "");
+    // Google News sends short snippets in both fields. Raw content also
+    // carries the thumbnail <img> — extracted for the imageUrl (SSRF-gated).
+    const rawContent = item.content ?? item.contentSnippet ?? "";
+    const rawLede = stripHtml(rawContent);
     const lede = stripOutletSuffix(rawLede, label);
     articles.push({
       dedupKey: `${label}|${hashText(normalized)}`,
@@ -278,7 +319,10 @@ async function scrapeSource(
       url: item.link ?? "",
       lede,
       publishedAt,
-      imageUrl: "", // enriched post-clustering by the pipeline
+      // Feed-carried image when the feed provides one (Google News
+      // thumbnails, media:content, enclosure); otherwise the pipeline's
+      // enrichment fetches the og:image post-clustering.
+      imageUrl: extractFeedImage(item),
     });
   }
   return articles;

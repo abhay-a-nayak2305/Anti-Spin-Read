@@ -145,22 +145,33 @@ console.log("== test: fetchOgImage via stubbed fetch ==");
   try {
     await (async () => {
       // html page -> og:image extracted
-      await stubFetch(async () => ({
-        ok: true,
-        status: 200,
-        url: "https://a.example/story",
-        headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
-        body: new ReadableStream({
-          start(c) {
-            c.enqueue(new TextEncoder().encode('<meta property="og:image" content="https://a.example/img.jpg">'));
-            c.close();
-          },
-        }),
-      }));
+      let sentUa = "";
+      await stubFetch(async (_url, init) => {
+        sentUa = String((init?.headers as Record<string, string> | undefined)?.["User-Agent"] ?? "");
+        return {
+          ok: true,
+          status: 200,
+          url: "https://a.example/story",
+          headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+          body: new ReadableStream({
+            start(c) {
+              c.enqueue(new TextEncoder().encode('<meta property="og:image" content="https://a.example/img.jpg">'));
+              c.close();
+            },
+          }),
+        };
+      });
       // import lazily so the stub is in place
       const { fetchOgImage } = await import("../src/images.js");
       const got = await fetchOgImage("https://a.example/story", 2000);
       check("extracts og:image from html", got === "https://a.example/img.jpg");
+      check(
+        "sends a browser-like UA (blocked outlets 403 bot UAs)",
+        sentUa.startsWith("Mozilla/5.0") &&
+          sentUa.includes("Chrome/") &&
+          !sentUa.includes("AntiSpinRead"),
+        `sent UA: ${sentUa}`
+      );
 
       // non-HTML content type -> skip
       await stubFetch(async () => ({

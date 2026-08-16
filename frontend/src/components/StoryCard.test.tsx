@@ -38,4 +38,30 @@ describe("StoryCard", () => {
       "var(--color-cat-world)"
     );
   });
+
+  it("always renders a hero image via the fallback chain (no NO IMAGE box)", () => {
+    const { container } = render(
+      <StoryCard
+        cluster={{
+          ...cluster,
+          articles: [
+            {
+              source: "BBC",
+              title: "No og:image story",
+              url: "https://www.bbc.co.uk/news/x",
+              lede: "lede",
+              publishedAt: "2026-08-15T00:00:00Z",
+              imageUrl: "",
+            },
+          ],
+        }}
+        onOpen={vi.fn()}
+      />
+    );
+    // The favicon is the first fallback candidate: /favicon.ico on the site host.
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute("src")).toContain("bbc.co.uk/favicon.ico");
+    expect(screen.queryByText("NO IMAGE")).not.toBeInTheDocument();
+  });
 });

@@ -84,11 +84,21 @@ One full run: `scrape → dedup/insert → cluster → enrich → frame → main
    keyed by a deterministic signature (`hash(sorted article keys)`) with a
    unique index, so re-runs return the existing cluster instead of
    duplicating rows.
-4. **Enrich.** New-cluster articles without an image get their page fetched
-   (6s timeout, HTML-only, `HTMLRewriter` in Workers / regex fallback in Node)
-   and `og:image` extracted — never following non-http(s) schemes, always
-   passing `isSafeHttpUrl`. Best-effort: failures are skipped and retried next
-   run. Capped at 30 articles to stay inside the free-tier subrequest budget.
+4. **Enrich.** Articles without an image get one from, in order of
+   preference:
+   - **Feed-carried images** (`extractFeedImage` in `scraper.ts`): the
+     `<img>` Google News embeds in item descriptions (CDATA, entity-decoded)
+     or `<media:content>`/`<enclosure url>` from direct feeds (The Hill, Sky
+     News, …). Feed-supplied URLs are untrusted input and pass
+     `isSafeHttpUrl` before they're stored.
+   - **og:image** (`images.ts`): the page is fetched (6s timeout, HTML-only,
+     `HTMLRewriter` in Workers / regex fallback in Node) and `og:image`
+     extracted — never following non-http(s) schemes, always passing
+     `isSafeHttpUrl`. Sent with a browser-like UA: several outlets 403
+     non-browser UAs. Best-effort: failures are skipped and retried next
+     run (per-run `ENRICH_BATCH=8` for fresh clusters plus a 4-article
+     catch-up for older image-less cluster articles, all inside the
+     free-tier subrequest budget).
 5. **Frame.** Up to 3 concurrent Gemini calls per cluster with `responseSchema`
    constrained JSON output (`temperature 0.4`, `maxOutputTokens 1200`). The
    primary model gets 3 attempts with backoff (500/1500 ms); transient failures

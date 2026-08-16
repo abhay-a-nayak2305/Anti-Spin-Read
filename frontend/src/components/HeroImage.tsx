@@ -6,7 +6,9 @@ import { LetterBadge } from "./LetterBadge";
  * Hero image with a privacy-preserving fallback chain:
  * og:image → site favicon (`<host>/favicon.ico`, no Google lookup) → inline
  * SVG letter monogram. The final badge costs zero network requests, so the
- * hero box is always filled.
+ * hero box is always filled. When the chain starts in fallback (no og:image
+ * at all), the diagonal-stripe pattern shows through at 30% so the box still
+ * reads as a designed placeholder rather than a broken image.
  *
  * The wrapper owns the 16:9 aspect ratio and the img carries explicit
  * intrinsic dimensions (1280×720), so the browser reserves layout space
@@ -26,10 +28,11 @@ export function HeroImage({
   const candidates = [src, faviconUrl(site)].filter(Boolean);
   const current = candidates[srcIndex];
   const exhausted = srcIndex >= candidates.length;
+  const isFallback = !src || srcIndex > 0;
 
   return (
     <div className="relative aspect-video overflow-hidden bg-ink">
-      {srcIndex > 0 && (
+      {isFallback && (
         <div className="absolute inset-0 no-img opacity-30" aria-hidden />
       )}
       {exhausted ? (
