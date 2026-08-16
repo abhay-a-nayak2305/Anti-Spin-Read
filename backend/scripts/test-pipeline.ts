@@ -24,6 +24,8 @@ const env: Env = {
   GEMINI_API_KEY: "test-key",
   GEMINI_MODEL: "gemini-3.5-flash",
   CLUSTER_WINDOW_HOURS: "48",
+  ALLOWED_ORIGINS: "",
+  CRON_RATE_LIMIT: "5",
 };
 
 function article(key: string, title: string, source = "s"): RawArticle {

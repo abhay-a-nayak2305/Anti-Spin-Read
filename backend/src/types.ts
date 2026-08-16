@@ -59,8 +59,4 @@ export interface Env extends __BaseEnv_Env {
   /** Fallback model tried when the primary exhausts retries */
   GEMINI_MODEL_FALLBACK?: string;
   CRON_SECRET?: string;
-  /** Comma-separated CORS allowlist; defaults to local dev origins */
-  ALLOWED_ORIGINS?: string;
-  /** Max /api/cron triggers per IP per 10 minutes (default 5) */
-  CRON_RATE_LIMIT?: string;
 }

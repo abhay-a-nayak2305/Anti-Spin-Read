@@ -95,7 +95,7 @@ async function main() {
     const rlDb = new MemoryDb();
     await seedFixtures(rlDb);
     const rlApp = createApp(rlDb);
-    const rlEnv = { GEMINI_API_KEY: "", CRON_SECRET: SECRET, CRON_RATE_LIMIT: "1", DB: {} } as Env;
+    const rlEnv = { GEMINI_API_KEY: "", CRON_SECRET: SECRET, CRON_RATE_LIMIT: "1", DB: {} } as unknown as Env;
     const first = await rlApp.request(
       "/api/cron",
       { method: "POST", headers: { "x-cron-secret": SECRET, "cf-connecting-ip": "1.2.3.4" } },

@@ -27,7 +27,7 @@ Everything runs on Cloudflare's free tier:
 │        │                                                            │
 │        ▼                                                            │
 │  runPipeline (backend/src/pipeline.ts)                              │
-│    1. scrape: Google News RSS, 8 outlets (scraper.ts)               │
+│    1. scrape: direct outlet RSS, 18 outlets (scraper.ts)              │
 │        · 15s timeout · content-type/4MB caps · suffix stripping     │
 │    2. dedup + insert: articles (dedup_key PK, INSERT OR IGNORE)     │
 │    3. cluster: tokenize → rare-token-boosted Jaccard, ≥2 outlets    │
@@ -58,7 +58,7 @@ Everything runs on Cloudflare's free tier:
 One full run: `scrape → dedup/insert → cluster → enrich → frame → maintain → log`.
 
 1. **Scrape.** `scrapeAll(windowHours)` fetches Google News RSS filtered per
-   outlet (`when:{hours}h site:{site}`) for the 8 configured outlets
+   outlet (`when:{hours}h site:{site}`) for the 18 configured outlets
    (`config.ts`). Each feed is validated (15s timeout, non-HTML content-type,
    4MB body cap, 200-item cap). Titles/ledes are cleaned: Google's
    `"Headline - BBC"` suffix, outlet-name variants (`AP News`, `Al Jazeera

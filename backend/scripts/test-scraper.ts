@@ -33,6 +33,16 @@ const DIRECT_FEED_URLS: Record<string, string> = {
   "theguardian.com": "https://www.theguardian.com/rss",
   "apnews.com": "https://apnews.com/hub/rss/ap-top-news",
   "thehill.com": "https://thehill.com/rss",
+  "france24.com": "https://www.france24.com/en/rss",
+  "dw.com": "https://rss.dw.com/rdf/rss-en-world",
+  "news.sky.com": "https://feeds.skynews.com/feeds/rss/world.xml",
+  "cnbc.com": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+  "theverge.com": "https://www.theverge.com/rss/index.xml",
+  "abcnews.go.com": "https://abcnews.go.com/abcnews/topstories",
+  "nbcnews.com": "https://feeds.nbcnews.com/nbcnews/public/news",
+  "usatoday.com": "https://rssfeeds.usatoday.com/usatoday-NewsTopStories",
+  "independent.co.uk": "https://www.independent.co.uk/rss",
+  "politico.com": "https://www.politico.com/rss",
 };
 
 function feedXml(items: string): string {

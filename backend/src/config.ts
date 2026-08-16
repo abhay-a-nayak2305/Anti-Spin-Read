@@ -10,6 +10,16 @@ export const sources = [
   { label: "The Guardian", site: "theguardian.com" },
   { label: "AP", site: "apnews.com" },
   { label: "The Hill", site: "thehill.com" },
+  { label: "France 24", site: "france24.com" },
+  { label: "DW", site: "dw.com" },
+  { label: "Sky News", site: "news.sky.com" },
+  { label: "CNBC", site: "cnbc.com" },
+  { label: "The Verge", site: "theverge.com" },
+  { label: "ABC News", site: "abcnews.go.com" },
+  { label: "NBC News", site: "nbcnews.com" },
+  { label: "USA Today", site: "usatoday.com" },
+  { label: "The Independent", site: "independent.co.uk" },
+  { label: "Politico", site: "politico.com" },
 ] as const;
 
 export const DEFAULT_CLUSTER_WINDOW_HOURS = 48;
