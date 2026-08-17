@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Pipeline watchdog.** Every run races a 12-minute timer; if it fires, the
+  run records `pipeline watchdog: stuck in stage "X"` (stage markers at
+  scrape/insert/cluster/enrich/queue/frame/maintain pin down the hang) and
+  releases the lock, so the next cron recovers instead of leaving a zombie
+  holding the lock for its full 30-minute lease. A stuck outbound call can
+  no longer starve the site — the worst case is one skipped slot.
 - **Framing-only cron mode.** A second cron trigger (`7,22,37,52 * * * *`,
   `FRAMING_CRON_SCHEDULE` in `backend/src/config.ts`) runs the pipeline
   with scrape/dedup/enrich skipped and frames only the unframed retry

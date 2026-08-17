@@ -147,6 +147,16 @@ Release is `DELETE ... WHERE token = ?` — only the owning run (matching token)
 can release. Overlapping runs (cron + manual trigger) skip instead of
 colliding, and the skip itself is recorded in the event log (`skipped: 1`).
 
+**Watchdog.** Each run additionally races a 12-minute timer (`WATCHDOG_MS` in
+`pipeline.ts`, injectable for tests). If the timer wins, the run records
+`pipeline watchdog: stuck in stage "X"` in the event log — stage markers are
+updated at every phase (scrape → insert-articles → cluster → enrich →
+queue-clusters → frame → maintain) so the error pinpoints the hang — and the
+`finally` block releases the lock. This bounds the damage of any stuck
+outbound call (a fetch whose abort never fires, a D1 write stall, …): the
+worst case is one skipped 15-minute slot, never a zombie that holds the lock
+until its lease expires or blocks later runs.
+
 ## The read API (`backend/src/index.ts`)
 
 - **`GET /api/clusters`** — paginated (`limit` 1–50 default 50, `offset`
