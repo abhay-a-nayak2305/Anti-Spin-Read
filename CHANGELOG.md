@@ -57,6 +57,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scrapes all 18 outlets and fails when fewer than 10 respond — a silent
   feed-URL change or IP block can no longer degrade the site unnoticed.
   No secrets or Gemini keys involved.
+- **UI smoke suite in CI.** The Playwright browser suite
+  (`frontend/tests/ui_test.py`, 62 checks) now runs in
+  `.github/workflows/ci.yml` — seeded in-memory API on :4321 + Vite on
+  :5173, chromium via setup-python, no Playwright config file. A UI
+  regression can no longer land green.
+- **Uptime heartbeat workflow.** `.github/workflows/uptime.yml` pings the
+  production `/api/health` and the SPA root every 30 minutes; a non-2xx
+  fails the job and GitHub emails the default branch — passive outage
+  detection with no external uptime service. No secrets.
 
 ### Changed
 
