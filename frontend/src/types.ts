@@ -42,6 +42,27 @@ export interface ClustersResponse {
   clusters: Cluster[];
 }
 
+export interface SearchResponse {
+  query: string;
+  limit: number;
+  hasMore: boolean;
+  clusters: Cluster[];
+}
+
+/** Per-outlet spin aggregate from /api/tone-radar (last 200 framed stories). */
+export interface ToneRadarOutlet {
+  source: string;
+  frames: number;
+  spun: number;
+  spinRatio: number;
+  tones: Record<string, number>;
+}
+
+export interface ToneRadarResponse {
+  computedAt: string;
+  outlets: ToneRadarOutlet[];
+}
+
 const TONE_COLORS: Record<string, string> = {
   neutral: "bg-paper text-ink",
   urgent: "bg-cat-business text-ink",

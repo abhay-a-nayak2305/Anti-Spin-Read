@@ -194,6 +194,27 @@ export function StoryModal({
             </figure>
           )}
 
+          {f === null && cluster.framingError && (
+            <div className="mt-5 border-2 border-alarm bg-alarm/10 p-4">
+              <p className="stamp stamp--alarm">Framing failed</p>
+              <p className="mt-2 text-sm leading-relaxed text-ink/85">
+                The framing report for this story failed to generate. It will
+                be retried automatically on a later run — the raw news below
+                is still worth reading.
+              </p>
+            </div>
+          )}
+
+          {f === null && !cluster.framingError && (
+            <div className="mt-5 border-2 border-dashed border-ink p-4">
+              <p className="stamp stamp--pending">Framing in progress</p>
+              <p className="mt-2 text-sm leading-relaxed text-ink/85">
+                The framing report is being generated — new reports land
+                within ~15 minutes. The raw news below is already here.
+              </p>
+            </div>
+          )}
+
           {f && (
             <Section title="How the coverage differs" accent={meta.fill}>
               {f.headlineDeltas.map((d, i) => (

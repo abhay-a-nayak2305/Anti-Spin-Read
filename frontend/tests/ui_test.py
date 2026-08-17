@@ -186,12 +186,53 @@ with sync_playwright() as p:
     expect(page.locator("article")).to_have_count(SEED_CARD_COUNT)
     check("ALL shows all cards again", page.locator("article").count() == SEED_CARD_COUNT)
 
-    print("== refresh button ==")
+    print("== page reload ==")
+    # The old "Refresh button" step referenced a button this UI never had
+    # (only the new-stories chip calls refresh, and only with a watermark).
+    # Reload verifies the same invariant: stories survive a full page load.
     before = page.locator("article").count()
-    page.locator("button", has_text="Refresh").click()
+    page.reload(wait_until="networkidle", timeout=30000)
     expect(page.locator("article")).to_have_count(before)
-    after = page.locator("article").count()
-    check("refresh keeps stories", before == after, f"{before}->{after}")
+    check("stories persist across reload", page.locator("article").count() == before)
+
+    print("== search ==")
+    page.locator("#search-input").fill("assad")
+    page.locator("button", has_text="Search").click()
+    expect(page.locator("article")).to_have_count(1)
+    check(
+        "search finds the Assad story",
+        "Assad" in page.locator("article").nth(0).locator("h3").inner_text(),
+    )
+    check(
+        "filter bar hidden while searching",
+        page.locator("[aria-label='Filter stories by category']").count() == 0,
+    )
+    page.locator("button", has_text="Clear").click()
+    expect(page.locator("article")).to_have_count(SEED_CARD_COUNT)
+    check(
+        "clearing search restores the grid",
+        page.locator("article").count() == SEED_CARD_COUNT,
+    )
+
+    print("== deep link ==")
+    cards.nth(0).locator("h3").click()
+    url_with_hash = page.url
+    check(
+        "card open sets #/story/<id> hash",
+        "#/story/" in url_with_hash,
+        url_with_hash,
+    )
+    page.locator("button[aria-label='Close story details']").click()
+    # A full navigation (not a hash-only same-document change) exercises the
+    # on-mount deep-link open path.
+    page.goto(BASE, wait_until="networkidle", timeout=30000)
+    page.goto(url_with_hash, wait_until="networkidle", timeout=30000)
+    expect(page.locator("[role=dialog]")).to_have_count(1)
+    check(
+        "shared link reopens the story on load",
+        page.locator("[role=dialog]").count() == 1,
+    )
+    page.locator("button[aria-label='Close story details']").click()
 
     print("== mobile pass ==")
     page.set_viewport_size({"width": 375, "height": 667})

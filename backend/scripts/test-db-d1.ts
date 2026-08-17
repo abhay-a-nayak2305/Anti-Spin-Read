@@ -186,6 +186,51 @@ console.log("== test: framing validation at rest ==");
   check("valid framing parsed", clusters.length === 1 && clusters[0].framing?.neutralSummary === "A neutral summary.");
 }
 
+console.log("== test: searchClusters + clusterById (real SQL) ==");
+{
+  const { db } = makeDb();
+  const t0 = new Date("2026-08-14T10:00:00Z");
+  const t1 = new Date("2026-08-14T11:00:00Z");
+  const idA = await seedCluster(
+    db,
+    [art("BBC", "Bashar al-Assad sentenced"), art("CNN", "Assad sentenced")],
+    t0,
+    "sig-search-a"
+  );
+  const idB = await seedCluster(
+    db,
+    [art("Guardian", "Trump media company reports loss"), art("Reuters", "Trump Media loss")],
+    t1,
+    "sig-search-b"
+  );
+  await db.saveFraming(idA, JSON.parse(framingJson()), new Date(), null);
+
+  const byAssad = await db.searchClusters("assad", 10);
+  check("keyPhrase match found", byAssad.some((c) => c.id === String(idA)));
+  check("title match found", byAssad.some((c) => c.id === String(idB)) === false);
+
+  const byTrump = await db.searchClusters("trump", 10);
+  check("article-title match found", byTrump.some((c) => c.id === String(idB)));
+
+  const ledeHit = await db.searchClusters("sentenced lede", 10);
+  check("lede match found", ledeHit.some((c) => c.id === String(idA)));
+
+  check("newest first", byAssad.length >= 1 && byAssad[0].id === String(idA));
+  const cap = await db.searchClusters("assad", 1);
+  check("limit honored", cap.length === 1);
+
+  const wild = await db.searchClusters("%", 10);
+  check("LIKE metachar escaped (no match-all)", wild.length === 0);
+  const underscore = await db.searchClusters("_", 10);
+  check("underscore escaped (no match-all)", underscore.length === 0);
+
+  const one = await db.clusterById(String(idB));
+  check("clusterById found", one !== null && one.id === String(idB));
+  check("clusterById attaches articles", one?.articles.length === 2);
+  check("clusterById attaches framing", (await db.clusterById(String(idA)))?.framing !== null);
+  check("clusterById missing -> null", (await db.clusterById("999999")) === null);
+}
+
 console.log("== test: clustersNeedingFraming retry queue ==");
 {
   const { db } = makeDb();

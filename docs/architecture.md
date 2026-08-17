@@ -165,6 +165,18 @@ until its lease expires or blocks later runs.
   URL, `Cache-Control: public, max-age=60`) — cached bodies are copied into a
   mutable Response so security headers and per-origin CORS are re-applied.
   Served URLs and image URLs pass `isSafeHttpUrl` again at serve time.
+- **`GET /api/search?q=&limit=`** — case-insensitive substring search over
+  cluster key phrases, article titles, and ledes via plain SQLite `LIKE`
+  (metacharacters escaped, so user input can't widen the match). No FTS5:
+  the table is ~100 clusters, sub-ms scans, and it stays free-tier friendly.
+  Edge-cached 60s like `/api/clusters`.
+- **`GET /api/clusters/:id`** — single story for shareable `#/story/<id>`
+  deep links; 404 (uncached) when the story was purged by the 14-day
+  retention.
+- **`GET /api/tone-radar`** — per-outlet spin share aggregated from the
+  `toneTags` already stored in the last 200 framed clusters. No new
+  storage or pipeline work — just an aggregate read, 60s edge-cached.
+  Powers the tone-radar panel under the grid.
 - **`GET /api/runs`** — recent pipeline runs, newest first, `Cache-Control:
   no-store` (operators want fresh state).
 - **`POST /api/cron`** — manual pipeline trigger. Fail-closed secret auth
@@ -222,6 +234,17 @@ on read** (`parseFraming` skips corrupt rows at query time — never served).
 - **Retention** — 14 days of clusters/articles in D1, 90 days of
   `pipeline_runs`; every table is bounded (free tier: 5M rows read/day, 1M
   writes/day — a row per 15 minutes is negligible).
+
+## Automated checks
+
+- **CI** (`.github/workflows/ci.yml`) — typecheck + full test suites on both
+  packages, both offline eval gates, npm audit, and a live pipeline e2e on
+  `main` only.
+- **Nightly regression** (`.github/workflows/nightly.yml`, 03:17 UTC +
+  manual dispatch) — re-runs both offline eval gates plus a **live feed
+  health check** (`backend/scripts/check-feeds.ts`): scrapes all 18 outlets
+  and fails when fewer than 10 respond, catching silent feed-URL changes or
+  IP blocks that no offline test could. No secrets or Gemini keys involved.
 
 ## Related docs
 

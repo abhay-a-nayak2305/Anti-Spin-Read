@@ -114,7 +114,46 @@ export class MemoryDb implements Db {
       if (bf !== af) return bf - af;
       return b.seenAt.getTime() - a.seenAt.getTime();
     });
-    return sorted.slice(offset, offset + limit).map((c) => ({
+    return sorted.slice(offset, offset + limit).map((c) => this.toRecord(c));
+  }
+
+  async searchClusters(query: string, limit: number): Promise<ClusterRecord[]> {
+    // Parity with D1Db.searchClusters: key phrase OR article title/lede
+    // substring match (case-insensitive), newest first by seenAt.
+    const q = query.toLowerCase();
+    return this.clusters
+      .filter((c) => {
+        if (c.keyPhrase.toLowerCase().includes(q)) return true;
+        return c.articleKeys.some((k) => {
+          const a = this.articles.get(k);
+          return (
+            !!a &&
+            (a.title.toLowerCase().includes(q) || a.lede.toLowerCase().includes(q))
+          );
+        });
+      })
+      .sort((a, b) => b.seenAt.getTime() - a.seenAt.getTime())
+      .slice(0, limit)
+      .map((c) => this.toRecord(c));
+  }
+
+  async clusterById(id: string): Promise<ClusterRecord | null> {
+    const c = this.clusters.find((x) => x.id === Number(id));
+    return c ? this.toRecord(c) : null;
+  }
+
+  /** Map an internal cluster to its public record shape (parity with D1Db). */
+  private toRecord(c: {
+    id: number;
+    keyPhrase: string;
+    articleKeys: string[];
+    seenAt: Date;
+    framedAt: Date | null;
+    framingError: string | null;
+    framing: IFraming | null;
+    sig: string;
+  }): ClusterRecord {
+    return {
       id: String(c.id),
       keyPhrase: c.keyPhrase,
       seenAt: c.seenAt,
@@ -124,7 +163,7 @@ export class MemoryDb implements Db {
       articles: c.articleKeys
         .map((k) => this.articles.get(k))
         .filter((a): a is RawArticle => !!a),
-    }));
+    };
   }
 
   async clustersNeedingFraming(limit: number): Promise<

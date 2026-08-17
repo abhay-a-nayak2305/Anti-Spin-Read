@@ -232,6 +232,82 @@ async function main() {
     check("private-network urls -> empty", sanitized?.articles?.every((a: any) => a.imageUrl === ""));
   }
 
+  console.log("== test: GET /api/search ==");
+  {
+    const r = await api("/api/search?q=assad");
+    check("200", r.status === 200);
+    check("shape", Array.isArray(r.json?.clusters) && r.json?.query === "assad");
+    const seeded = r.json?.clusters.find(
+      (c: any) => c.keyPhrase === "Bashar al-Assad sentenced to death"
+    );
+    check("seeded cluster found via keyPhrase", !!seeded);
+    check("full cluster shape (framing + articles)", !!seeded?.framing?.neutralSummary && seeded?.articles?.length === 3);
+    check("hasMore false", r.json?.hasMore === false);
+    check("cache-control public", r.headers.get("cache-control") === "public, max-age=60");
+
+    const r2 = await api("/api/search?q=trump");
+    check(
+      "article-title match (keyPhrase differs)",
+      r2.json?.clusters.some(
+        (c: any) => c.keyPhrase === "Trump media stock plunges after massive loss"
+      )
+    );
+
+    const r5 = await api("/api/search?q=zzzznothing");
+    check("no matches -> empty list", r5.json?.clusters.length === 0);
+    const r6 = await api("/api/search?q=50%25");
+    check("LIKE metacharacters don't match-all", r6.json?.clusters.length === 0);
+  }
+
+  console.log("== test: GET /api/search validation ==");
+  {
+    const short = await api("/api/search?q=x");
+    check("too-short q -> 400", short.status === 400);
+    const long = await api(`/api/search?q=${"a".repeat(101)}`);
+    check("too-long q -> 400", long.status === 400);
+    const empty = await api("/api/search?q=");
+    check("empty q -> 400", empty.status === 400);
+    const badLimit = await api("/api/search?q=assad&limit=99");
+    check("invalid limit -> 400", badLimit.status === 400);
+    const zeroLimit = await api("/api/search?q=assad&limit=0");
+    check("zero limit -> 400", zeroLimit.status === 400);
+  }
+
+  console.log("== test: GET /api/clusters/:id (deep link) ==");
+  {
+    const list = await api("/api/clusters");
+    const first = list.json?.clusters[0];
+    const r = await api(`/api/clusters/${first.id}`);
+    check("200 for existing id", r.status === 200);
+    check("same keyPhrase as list", r.json?.keyPhrase === first.keyPhrase);
+    check("articles attached", r.json?.articles?.length === first.articles?.length);
+    check("framing attached", !!r.json?.framing?.neutralSummary);
+    check("cache-control public", r.headers.get("cache-control") === "public, max-age=60");
+
+    const miss = await api("/api/clusters/999999");
+    check("missing -> 404", miss.status === 404);
+    const bad = await api("/api/clusters/abc");
+    check("non-numeric -> 400", bad.status === 400);
+    const huge = await api(`/api/clusters/${"9".repeat(11)}`);
+    check("overlong id -> 400", huge.status === 400);
+  }
+
+  console.log("== test: GET /api/tone-radar ==");
+  {
+    const r = await api("/api/tone-radar");
+    check("200", r.status === 200);
+    check("computedAt present", typeof r.json?.computedAt === "string");
+    const outlets = r.json?.outlets ?? [];
+    check("6 outlets from seeded framings", outlets.length === 6);
+    const bbc = outlets.find((o: any) => o.source === "BBC");
+    check("BBC: 3 frames, 2 spun (celebratory x2)", bbc?.frames === 3 && bbc?.spun === 2);
+    check("BBC spinRatio 2/3", Math.abs((bbc?.spinRatio ?? 0) - 2 / 3) < 1e-9);
+    check("tone counts tracked", bbc?.tones?.celebratory === 2 && bbc?.tones?.neutral === 1);
+    const cnn = outlets.find((o: any) => o.source === "CNN");
+    check("analytical-only outlet not spun", cnn?.frames === 1 && cnn?.spun === 0);
+    check("sorted by spinRatio desc", outlets[0].source === "BBC");
+  }
+
   console.log("== test: CORS allowlist ==");
   {
     const r = await api("/api/clusters", { origin: "http://localhost:5173" });

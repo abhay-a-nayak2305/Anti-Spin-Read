@@ -30,7 +30,42 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // Reset any deep-link hash left behind by a test.
+  window.history.replaceState(null, "", window.location.pathname);
 });
+
+/** Route fetch mocks by URL so the clusters, search, radar and deep-link
+ * endpoints each return their own shapes. */
+function routeFetchMock() {
+  fetchMock.mockImplementation((url: string) => {
+    if (url.includes("/api/tone-radar")) {
+      return Promise.resolve(
+        jsonResponse({ computedAt: "2026-08-15T12:00:00Z", outlets: [] })
+      );
+    }
+    if (url.includes("/api/search")) {
+      return Promise.resolve(
+        jsonResponse({
+          query: "assad",
+          limit: 50,
+          hasMore: false,
+          clusters: [makeCluster("42", "2026-08-15T10:30:00Z")],
+        })
+      );
+    }
+    if (url.includes("/api/clusters/42")) {
+      return Promise.resolve(jsonResponse(makeCluster("42", "2026-08-15T10:30:00Z")));
+    }
+    return Promise.resolve(
+      jsonResponse({
+        limit: 50,
+        offset: 0,
+        hasMore: false,
+        clusters: [makeCluster("a", "2026-08-15T10:00:00Z")],
+      })
+    );
+  });
+}
 
 describe("App — new stories banner", () => {
   it("badges stories newer than the last visit and marks them read on click", async () => {
@@ -83,5 +118,75 @@ describe("App — new stories banner", () => {
     expect(screen.queryByText(/new stories/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/all caught up/i)).not.toBeInTheDocument();
     expect(screen.queryAllByText("New")).toHaveLength(0);
+  });
+});
+
+describe("App — search", () => {
+  it("searches, replaces the grid with results, and clears back", async () => {
+    routeFetchMock();
+    render(<App />);
+    await screen.findByText("Story a");
+
+    const input = screen.getByRole("searchbox");
+    fireEvent.change(input, { target: { value: "assad" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await screen.findByText(/Search: “assad”/i);
+    expect(screen.getByText("Story 42")).toBeInTheDocument();
+    // The grid's own story is replaced while searching.
+    expect(screen.queryByText("Story a")).not.toBeInTheDocument();
+    // Category filter hides while searching (it doesn't apply to results).
+    expect(
+      screen.queryByRole("group", { name: /filter stories by category/i })
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /clear/i }));
+    await waitFor(() => expect(screen.getByText("Story a")).toBeInTheDocument());
+    expect(screen.queryByText("Story 42")).not.toBeInTheDocument();
+  });
+});
+
+describe("App — deep links", () => {
+  it("opens a story from a shared #/story/<id> link", async () => {
+    window.history.replaceState(null, "", "#/story/42");
+    routeFetchMock();
+    render(<App />);
+
+    const dialog = await screen.findByRole("dialog", { name: "Story 42" });
+    expect(dialog).toBeInTheDocument();
+    // Opened via the API, not from the polled grid.
+    expect(fetchMock).toHaveBeenCalledWith("/api/clusters/42");
+  });
+
+  it("shows a dismissible notice for a dead (pruned) shared link", async () => {
+    window.history.replaceState(null, "", "#/story/999");
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes("/api/tone-radar")) {
+        return Promise.resolve(
+          jsonResponse({ computedAt: "2026-08-15T12:00:00Z", outlets: [] })
+        );
+      }
+      if (url.includes("/api/clusters/999")) {
+        return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+      }
+      return Promise.resolve(
+        jsonResponse({
+          limit: 50,
+          offset: 0,
+          hasMore: false,
+          clusters: [makeCluster("a", "2026-08-15T10:00:00Z")],
+        })
+      );
+    });
+    render(<App />);
+
+    const notice = await screen.findByText(/pruned after 14 days/i);
+    expect(notice).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /dismiss link error/i }));
+    await waitFor(() =>
+      expect(screen.queryByText(/pruned after 14 days/i)).not.toBeInTheDocument()
+    );
   });
 });

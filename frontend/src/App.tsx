@@ -1,10 +1,15 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { SearchBox } from "./components/SearchBox";
 import { StoryCard } from "./components/StoryCard";
 import { StoryModal } from "./components/StoryModal";
+import { ToneRadar } from "./components/ToneRadar";
 import { useClusters } from "./hooks/useClusters";
+import { useSearch } from "./hooks/useSearch";
 import type { CategoryId, Cluster } from "./types";
 import { CATEGORY_META, CATEGORY_ORDER, categoryMeta } from "./types";
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 function CategoryFilter({
   active,
@@ -89,9 +94,68 @@ export default function App() {
     window.history.replaceState(null, "", url);
   }, []);
   const [selected, setSelected] = useState<Cluster | null>(null);
+  const [deepLinkError, setDeepLinkError] = useState<string | null>(null);
+  // Guards the deep-link fetch against re-fetching the story already shown
+  // (opening a card sets the hash; the hashchange would otherwise refetch).
+  const selectedIdRef = useRef<string | null>(null);
 
-  const openModal = useCallback((c: Cluster) => setSelected(c), []);
-  const closeModal = useCallback(() => setSelected(null), []);
+  const openModal = useCallback((c: Cluster) => {
+    setSelected(c);
+    setDeepLinkError(null);
+    selectedIdRef.current = c.id;
+    // Shareable deep link: #/story/<id> — preserved across category changes
+    // because it lives in the hash, not the query string.
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${window.location.search}#/story/${c.id}`
+    );
+  }, []);
+
+  const closeModal = useCallback(() => {
+    setSelected(null);
+    window.history.replaceState(
+      null,
+      "",
+      window.location.pathname + window.location.search
+    );
+  }, []);
+
+  // Opening a shared #/story/<id> URL loads that story from the API. A 404
+  // (story pruned after 14 days) surfaces as a dismissible notice instead
+  // of a silent dead link.
+  useEffect(() => {
+    const openFromHash = async () => {
+      const m = window.location.hash.match(/^#\/story\/(\d+)$/);
+      if (!m) return;
+      const id = m[1];
+      if (selectedIdRef.current === id) return;
+      selectedIdRef.current = id;
+      setDeepLinkError(null);
+      try {
+        const res = await fetch(`${API_BASE}/api/clusters/${id}`);
+        if (!res.ok) {
+          if (res.status === 404) {
+            setDeepLinkError(
+              "This story link is no longer available — stories are pruned after 14 days."
+            );
+          } else {
+            setDeepLinkError("Couldn't load the story from this link.");
+          }
+          selectedIdRef.current = null; // allow retrying the same link
+          return;
+        }
+        const body = (await res.json()) as Cluster;
+        setSelected(body);
+      } catch {
+        selectedIdRef.current = null;
+        setDeepLinkError("Couldn't load the story from this link.");
+      }
+    };
+    window.addEventListener("hashchange", openFromHash);
+    void openFromHash();
+    return () => window.removeEventListener("hashchange", openFromHash);
+  }, []);
 
   // Per-category counts across ALL clusters (not just the filtered view)
   const counts = useMemo(() => {
@@ -104,6 +168,9 @@ export default function App() {
     () => (filter === "all" ? clusters : clusters.filter((c) => c.category === filter)),
     [clusters, filter]
   );
+
+  const search = useSearch();
+  const searching = search.q !== "";
 
   return (
     <div className="min-h-screen">
@@ -147,7 +214,30 @@ export default function App() {
           </div>
         )}
 
-        <CategoryFilter active={filter} counts={counts} onChange={updateFilter} />
+        <div className="mb-5 flex items-center gap-3">
+          <SearchBox onSearch={(q) => void search.search(q)} busy={search.searching} />
+        </div>
+
+        {deepLinkError && (
+          <div className="mb-5 flex items-center justify-between gap-3 border-2 border-alarm bg-alarm/10 p-3 text-paper">
+            <p className="text-sm">
+              <span className="stamp stamp--alarm mr-2">Link error</span>
+              {deepLinkError}
+            </p>
+            <button
+              type="button"
+              onClick={() => setDeepLinkError(null)}
+              aria-label="Dismiss link error"
+              className="shrink-0 border border-paper px-2 py-0.5 font-display text-xs hover:bg-paper hover:text-ink"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {!searching && (
+          <CategoryFilter active={filter} counts={counts} onChange={updateFilter} />
+        )}
 
         <div className="mt-8 space-y-8">
           {loading && (
@@ -211,21 +301,61 @@ export default function App() {
             </div>
           )}
 
+          {searching && (
+            <div className="flex items-center justify-between gap-3 border-2 border-ink bg-ink px-3 py-2">
+              <p className="min-w-0 truncate font-display text-xs uppercase tracking-wide text-paper">
+                Search: “{search.q}” — {search.clusters.length}{" "}
+                {search.clusters.length === 1 ? "story" : "stories"}
+                {search.hasMore ? "+" : ""}
+              </p>
+              <button
+                type="button"
+                onClick={search.clear}
+                className="shrink-0 stamp bg-acid text-ink"
+              >
+                Clear ✕
+              </button>
+            </div>
+          )}
+
+          {search.searching && (
+            <div className="slab--flat border-dashed p-8 text-center">
+              <p className="font-display text-lg uppercase">Searching…</p>
+            </div>
+          )}
+
+          {searching && !search.searching && search.error && (
+            <div className="slab--flat border-alarm bg-alarm/10 p-6 text-paper">
+              <p className="stamp stamp--alarm">Search error</p>
+              <p className="mt-3 text-sm">{search.error}</p>
+            </div>
+          )}
+
+          {searching && !search.searching && !search.error && search.clusters.length === 0 && (
+            <div className="slab--flat border-dashed p-8 text-center">
+              <p className="font-display text-lg uppercase">No matches</p>
+              <p className="mt-2 text-sm text-ink/70">
+                Nothing found for “{search.q}” — try another outlet name,
+                topic, or keyword.
+              </p>
+            </div>
+          )}
+
           {visible.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-              {visible.map((c, i) => (
+              {(searching ? search.clusters : visible).map((c, i) => (
                 <StoryCard
                   key={c.id}
                   cluster={c}
                   onOpen={openModal}
                   eager={i === 0}
-                  isNew={newSince !== null && c.seenAt > newSince}
+                  isNew={!searching && newSince !== null && c.seenAt > newSince}
                 />
               ))}
             </div>
           )}
 
-          {hasMore && visible.length > 0 && (
+          {hasMore && !searching && visible.length > 0 && (
             <div className="flex justify-center">
               <button
                 type="button"
@@ -237,6 +367,8 @@ export default function App() {
               </button>
             </div>
           )}
+
+          {!searching && <ToneRadar />}
         </div>
       </main>
 

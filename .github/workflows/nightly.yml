@@ -1,0 +1,59 @@
+name: Nightly regression
+
+on:
+  schedule:
+    # 03:17 UTC daily — quiet hours, before the day's news cycle peaks.
+    - cron: "17 3 * * *"
+  workflow_dispatch: {}
+
+# Nightly re-run of the offline eval gates plus a LIVE feed health check.
+# No secrets or Gemini keys are used here — the framing eval stays on its
+# offline corpus so the scheduled workflow can run without any secrets.
+jobs:
+  cluster-eval:
+    name: Clustering eval gate (bilingual corpus)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx tsx scripts/eval-cluster.ts
+
+  framing-eval:
+    name: Framing eval gate (offline corpus)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx tsx scripts/eval-framing.ts
+
+  feed-check:
+    name: Live feed health check (all outlets)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx tsx scripts/check-feeds.ts

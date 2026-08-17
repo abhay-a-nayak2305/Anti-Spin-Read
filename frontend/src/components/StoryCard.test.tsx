@@ -74,4 +74,43 @@ describe("StoryCard", () => {
     expect(card!.className).toContain("shadow-[8px_8px_0_var(--color-paper)]");
     expect(card!.className).not.toContain("border-ink");
   });
+
+  it("shows the Framing… pending chip while the report is being generated", () => {
+    render(
+      <StoryCard
+        cluster={{ ...cluster, framing: null, framingError: null }}
+        onOpen={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Framing…")).toBeInTheDocument();
+  });
+
+  it("omits the pending chip once framing exists", () => {
+    render(
+      <StoryCard
+        cluster={{
+          ...cluster,
+          framing: {
+            headlineDeltas: [],
+            toneTags: [],
+            notableOmissions: [],
+            neutralSummary: "Summary.",
+          },
+          framingError: null,
+        }}
+        onOpen={vi.fn()}
+      />
+    );
+    expect(screen.queryByText("Framing…")).not.toBeInTheDocument();
+  });
+
+  it("omits the pending chip when framing failed (error state, not pending)", () => {
+    render(
+      <StoryCard
+        cluster={{ ...cluster, framing: null, framingError: "Framing failed" }}
+        onOpen={vi.fn()}
+      />
+    );
+    expect(screen.queryByText("Framing…")).not.toBeInTheDocument();
+  });
 });

@@ -11,9 +11,12 @@ import { categorizeCluster } from "./categorize.js";
 import { isSafeHttpUrl } from "./images.js";
 import { createSlidingWindowLimiter } from "./rate-limit.js";
 import type { Db } from "./db.js";
-import type { Env } from "./types.js";
+import type { ClusterRecord, Env } from "./types.js";
 
 const RATE_WINDOW_MS = 10 * 60_000;
+
+/** Tone radar aggregates toneTags over the last N framed clusters. */
+const RADAR_CLUSTERS = 200;
 
 /**
  * Constant-time string compare (no early exit on byte mismatch).
@@ -39,6 +42,54 @@ function applySecurityHeaders(headers: Headers): void {
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Frame-Options", "DENY");
   headers.set("Referrer-Policy", "no-referrer");
+}
+
+/** Map a ClusterRecord to the public API shape (SSRF re-check on serve). */
+function toApiCluster(cl: ClusterRecord) {
+  return {
+    id: cl.id,
+    keyPhrase: cl.keyPhrase,
+    category: categorizeCluster(cl),
+    seenAt: cl.seenAt.toISOString(),
+    framedAt: cl.framedAt ? cl.framedAt.toISOString() : null,
+    // Details stay in D1 for the operator; clients get a generic label
+    framingError: cl.framingError ? "Framing failed" : null,
+    framing: cl.framing,
+    articles: cl.articles.map((a) => ({
+      source: a.source,
+      title: a.title,
+      // Defense in depth: never serve non-http(s) URLs from feed data
+      url: isSafeHttpUrl(a.url) ? a.url : "",
+      lede: a.lede,
+      publishedAt: a.publishedAt.toISOString(),
+      imageUrl: isSafeHttpUrl(a.imageUrl) ? a.imageUrl : "",
+    })),
+  };
+}
+
+/** Edge-cache read: hit -> a mutable copy of the cached Response, else null. */
+async function edgeCacheHit(reqUrl: string): Promise<Response | null> {
+  if (typeof caches === "undefined") return null;
+  const cacheKey = new Request(reqUrl);
+  const hit = await caches.default.match(cacheKey).catch(() => null);
+  if (hit) {
+    // Copy to a mutable Response so the middleware can re-apply
+    // security headers + per-origin CORS on the cached body.
+    return new Response(hit.body, { status: hit.status, headers: hit.headers });
+  }
+  return null;
+}
+
+/**
+ * Edge-cache write (body is cloned; the caller's Response stays usable).
+ * Returns null when the Cache API is unavailable (tests/Node) — callers
+ * must skip executionCtx.waitUntil in that case, since the test harness
+ * has no ExecutionContext at all.
+ */
+function edgeCachePut(reqUrl: string, res: Response): Promise<void> | null {
+  if (typeof caches === "undefined") return null;
+  const cacheKey = new Request(reqUrl);
+  return caches.default.put(cacheKey, res.clone()).catch(() => {});
 }
 
 /**
@@ -193,55 +244,134 @@ export function createApp(db?: Db) {
       if (limit === null || offset === null) {
         return c.json({ error: "invalid limit/offset" }, 400);
       }
-      const cache = typeof caches !== "undefined" ? caches.default : null;
-      const cacheKey = new Request(c.req.url);
-      if (cache) {
-        const hit = await cache.match(cacheKey).catch(() => null);
-        if (hit) {
-          // Copy to a mutable Response so the middleware can re-apply
-          // security headers + per-origin CORS on the cached body.
-          return new Response(hit.body, {
-            status: hit.status,
-            headers: hit.headers,
-          });
-        }
-      }
+      const cached = await edgeCacheHit(c.req.url);
+      if (cached) return cached;
       // Fetch one extra row to report hasMore without a count query.
-      const db = resolveDb(c.env);
-      const rows = await db.latestClusters(limit + 1, offset);
+      const rows = await resolveDb(c.env).latestClusters(limit + 1, offset);
       const hasMore = rows.length > limit;
-      const clusters = rows.slice(0, limit);
       c.header("Cache-Control", "public, max-age=60");
       const res = c.json({
         limit,
         offset,
         hasMore,
-        clusters: clusters.map((cl) => ({
-          id: cl.id,
-          keyPhrase: cl.keyPhrase,
-          category: categorizeCluster(cl),
-          seenAt: cl.seenAt.toISOString(),
-          framedAt: cl.framedAt ? cl.framedAt.toISOString() : null,
-          // Details stay in D1 for the operator; clients get a generic label
-          framingError: cl.framingError ? "Framing failed" : null,
-          framing: cl.framing,
-          articles: cl.articles.map((a) => ({
-            source: a.source,
-            title: a.title,
-            // Defense in depth: never serve non-http(s) URLs from feed data
-            url: isSafeHttpUrl(a.url) ? a.url : "",
-            lede: a.lede,
-            publishedAt: a.publishedAt.toISOString(),
-            imageUrl: isSafeHttpUrl(a.imageUrl) ? a.imageUrl : "",
-          })),
-        })),
+        clusters: rows.slice(0, limit).map(toApiCluster),
       });
-      if (cache) {
-        c.executionCtx.waitUntil(cache.put(cacheKey, res.clone()).catch(() => {}));
-      }
+      const put = edgeCachePut(c.req.url, res);
+      if (put) c.executionCtx.waitUntil(put);
       return res;
     } catch (err) {
       console.error("[api] clusters failed:", err);
+      return c.json({ error: "internal error" }, 500);
+    }
+  });
+
+  // Search: clusters whose key phrase or any article title/lede contains q
+  // (case-insensitive substring). Plain LIKE over a small table — no FTS5,
+  // no migration, no cost.
+  app.get("/api/search", async (c) => {
+    try {
+      const rawQ = (c.req.query("q") ?? "").trim();
+      if (rawQ.length < 2 || rawQ.length > 100) {
+        return c.json({ error: "invalid q (2-100 chars)" }, 400);
+      }
+      const rawLimit = Number(c.req.query("limit") ?? "50");
+      const limit =
+        Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 50
+          ? rawLimit
+          : null;
+      if (limit === null) {
+        return c.json({ error: "invalid limit" }, 400);
+      }
+      const cached = await edgeCacheHit(c.req.url);
+      if (cached) return cached;
+      const rows = await resolveDb(c.env).searchClusters(rawQ, limit + 1);
+      const hasMore = rows.length > limit;
+      c.header("Cache-Control", "public, max-age=60");
+      const res = c.json({
+        query: rawQ,
+        limit,
+        hasMore,
+        clusters: rows.slice(0, limit).map(toApiCluster),
+      });
+      const put = edgeCachePut(c.req.url, res);
+      if (put) c.executionCtx.waitUntil(put);
+      return res;
+    } catch (err) {
+      console.error("[api] search failed:", err);
+      return c.json({ error: "internal error" }, 500);
+    }
+  });
+
+  // Single cluster by numeric id — powers shareable deep links (#/story/:id).
+  // 404 (uncached) when purged: a dead link is honest, not a redirect loop.
+  app.get("/api/clusters/:id", async (c) => {
+    try {
+      const rawId = c.req.param("id");
+      if (!/^\d{1,10}$/.test(rawId)) {
+        return c.json({ error: "invalid id" }, 400);
+      }
+      const cached = await edgeCacheHit(c.req.url);
+      if (cached) return cached;
+      const row = await resolveDb(c.env).clusterById(rawId);
+      if (!row) {
+        return c.json({ error: "not found" }, 404);
+      }
+      c.header("Cache-Control", "public, max-age=60");
+      const res = c.json(toApiCluster(row));
+      const put = edgeCachePut(c.req.url, res);
+      if (put) c.executionCtx.waitUntil(put);
+      return res;
+    } catch (err) {
+      console.error("[api] cluster failed:", err);
+      return c.json({ error: "internal error" }, 500);
+    }
+  });
+
+  // Tone radar: per-outlet spin share across the last 200 framed clusters,
+  // aggregated from the toneTags the framing stage already stores. No new
+  // storage or pipeline work — just an aggregate read, 60s edge-cached.
+  app.get("/api/tone-radar", async (c) => {
+    try {
+      const cached = await edgeCacheHit(c.req.url);
+      if (cached) return cached;
+      const rows = await resolveDb(c.env).latestClusters(RADAR_CLUSTERS);
+      const outlets = new Map<
+        string,
+        {
+          source: string;
+          frames: number;
+          spun: number;
+          tones: Record<string, number>;
+        }
+      >();
+      for (const cl of rows) {
+        if (!cl.framing) continue;
+        for (const t of cl.framing.toneTags) {
+          let o = outlets.get(t.source);
+          if (!o) {
+            o = { source: t.source, frames: 0, spun: 0, tones: {} };
+            outlets.set(t.source, o);
+          }
+          o.frames++;
+          o.tones[t.tone] = (o.tones[t.tone] ?? 0) + 1;
+          // Spin = any non-neutral, non-analytical tone (urgent/alarmist/
+          // skeptical/celebratory — anything that colors the framing).
+          if (t.tone !== "neutral" && t.tone !== "analytical") o.spun++;
+        }
+      }
+      const list = [...outlets.values()]
+        .map((o) => ({
+          ...o,
+          spinRatio: o.frames > 0 ? o.spun / o.frames : 0,
+        }))
+        .sort((a, b) => b.spinRatio - a.spinRatio || b.frames - a.frames);
+      c.header("Cache-Control", "public, max-age=60");
+      const res = c.json({ computedAt: new Date().toISOString(), outlets: list });
+      const put = edgeCachePut(c.req.url, res);
+      if (put) c.executionCtx.waitUntil(put);
+      return res;
+    } catch (err) {
+      console.error("[api] tone-radar failed:", err);
       return c.json({ error: "internal error" }, 500);
     }
   });

@@ -132,4 +132,33 @@ describe("StoryModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close story details" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it("shows the pending block while framing is being generated", () => {
+    render(
+      <StoryModal
+        cluster={{ ...cluster, framing: null, framedAt: null, framingError: null }}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Framing in progress")).toBeInTheDocument();
+    // Framing-only sections are hidden, the raw news stays.
+    expect(screen.queryByText("How the coverage differs")).not.toBeInTheDocument();
+    expect(screen.getByText("The news, outlet by outlet")).toBeInTheDocument();
+    expect(screen.getByText("BBC headline")).toBeInTheDocument();
+  });
+
+  it("shows the failed block when framing errored (never a false 'pending')", () => {
+    render(
+      <StoryModal
+        cluster={{ ...cluster, framing: null, framedAt: null, framingError: "Framing failed" }}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Framing failed")).toBeInTheDocument();
+    expect(screen.queryByText("Framing in progress")).not.toBeInTheDocument();
+    expect(screen.queryByText("How the coverage differs")).not.toBeInTheDocument();
+    expect(screen.getByText("The news, outlet by outlet")).toBeInTheDocument();
+  });
 });

@@ -48,6 +48,13 @@ export interface Db {
   setArticleImage(dedupKey: string, imageUrl: string): Promise<void>;
   latestClusters(limit: number, offset?: number): Promise<ClusterRecord[]>;
   /**
+   * Clusters whose key phrase, or any referenced article's title/lede,
+   * contains `query` (case-insensitive), newest first.
+   */
+  searchClusters(query: string, limit: number): Promise<ClusterRecord[]>;
+  /** A single cluster by numeric id — null when missing (e.g. purged). */
+  clusterById(id: string): Promise<ClusterRecord | null>;
+  /**
    * Clusters whose framing is still NULL (never attempted or failed),
    * oldest first — the retry queue for the pipeline.
    */
@@ -282,9 +289,59 @@ export class D1Db implements Db {
       .bind(limit, offset)
       .all();
 
+    return this.hydrate(results);
+  }
+
+  async searchClusters(query: string, limit: number): Promise<ClusterRecord[]> {
+    // LIKE is ASCII-case-insensitive in SQLite; the pattern escapes the
+    // LIKE metacharacters (%, _, \) so user input can't widen the match.
+    const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+    const pattern = `%${escaped}%`;
+    const { results } = await this.env
+      .prepare(
+        `SELECT c.id AS c_id, c.key_phrase, c.seen_at, c.framed_at, c.framing_error, c.framing
+         FROM clusters c
+         WHERE c.key_phrase LIKE ? ESCAPE '\\'
+            OR EXISTS (
+              SELECT 1
+              FROM cluster_articles ca
+              JOIN articles a ON a.dedup_key = ca.dedup_key
+              WHERE ca.cluster_id = c.id
+                AND (a.title LIKE ? ESCAPE '\\' OR a.lede LIKE ? ESCAPE '\\')
+            )
+         ORDER BY c.seen_at DESC
+         LIMIT ?`
+      )
+      .bind(pattern, pattern, pattern, limit)
+      .all();
+
+    return this.hydrate(results);
+  }
+
+  async clusterById(id: string): Promise<ClusterRecord | null> {
+    const { results } = await this.env
+      .prepare(
+        `SELECT c.id AS c_id, c.key_phrase, c.seen_at, c.framed_at, c.framing_error, c.framing
+         FROM clusters c
+         WHERE c.id = ?
+         LIMIT 1`
+      )
+      .bind(id)
+      .all();
+    if (results.length === 0) return null;
+    const hydrated = await this.hydrate(results);
+    return hydrated[0] ?? null;
+  }
+
+  /**
+   * Map cluster rows (aliased c_id) to ClusterRecords, validating framing
+   * JSON at rest (a corrupt row is skipped, never served) and loading each
+   * cluster's articles in one chunked IN query.
+   */
+  private async hydrate(rows: Record<string, unknown>[]): Promise<ClusterRecord[]> {
     const clusters: ClusterRecord[] = [];
     const byId = new Map<number, ClusterRecord>();
-    for (const row of results) {
+    for (const row of rows) {
       const id = Number(row.c_id);
       let framing: IFraming | null = null;
       if (row.framing != null) {

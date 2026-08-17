@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Search.** A search box (Enter or SEARCH) queries the new
+  `GET /api/search` endpoint — case-insensitive substring over cluster key
+  phrases, article titles, and ledes. Results replace the grid (with a
+  clearable "Search: …" header); `LIKE` metacharacters in the query are
+  escaped so user input can't widen into a wildcard scan, and queries
+  shorter than 2 chars are rejected with 400. Free-tier friendly: plain
+  `LIKE` over a small table (no FTS5), 60s edge-cached.
+- **Shareable story links.** Every story card now sets
+  `#/story/<id>` in the address bar when opened; pasting the URL opens that
+  exact story (fetched from the new `GET /api/clusters/:id`). A pruned
+  (14-day retention) or invalid link shows a dismissible notice instead of
+  a silent dead end. The hash composes with `?category=` so filters survive.
+- **Pending-card state.** Stories whose framing report hasn't been generated
+  yet show a "Framing…" chip on the card and a "Framing in progress" block
+  in the modal (with the raw outlet-by-outlet news still readable); failed
+  framings show a distinct "Framing failed — will be retried" block.
+- **Tone radar.** A "Tone radar — who's spinning?" panel under the grid
+  shows each outlet's spin share across the last 200 framed stories
+  (aggregated server-side from the existing `toneTags` — no new storage or
+  pipeline cost, 60s edge-cached `GET /api/tone-radar`). Spin = any
+  non-neutral/analytical tone; bars are sorted by spin share with per-tone
+  counts. The panel renders nothing on failure — it can never break the page.
+- **Nightly regression workflow.** `.github/workflows/nightly.yml`
+  (03:17 UTC daily + manual dispatch) re-runs both offline eval gates and a
+  new live **feed health check** (`backend/scripts/check-feeds.ts`) that
+  scrapes all 18 outlets and fails when fewer than 10 respond — a silent
+  feed-URL change or IP block can no longer degrade the site unnoticed.
+  No secrets or Gemini keys involved.
+
+### Changed
+
 - **Pipeline watchdog.** Every run races a 12-minute timer; if it fires, the
   run records `pipeline watchdog: stuck in stage "X"` (stage markers at
   scrape/insert/cluster/enrich/queue/frame/maintain pin down the hang) and

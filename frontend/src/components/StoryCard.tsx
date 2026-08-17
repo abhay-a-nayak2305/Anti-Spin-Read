@@ -68,6 +68,11 @@ export function StoryCard({
           <span className={`stamp ${meta.stamp} text-[10px]`}>
             {meta.label}
           </span>
+          {!cluster.framing && !cluster.framingError && (
+            <span className="stamp stamp--pending text-[10px]">
+              Framing…
+            </span>
+          )}
           <SourceCountBadge count={sourceCount} className="gap-1" />
           <span className="text-[10px] uppercase tracking-widest text-ink/50">
             {timeAgo(cluster.seenAt)}

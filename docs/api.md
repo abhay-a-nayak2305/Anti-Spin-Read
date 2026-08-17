@@ -15,6 +15,9 @@ deployed origin (e.g. `https://anti-spin-read.<subdomain>.workers.dev`).
 | `GET /api/health` | none | no-store (not set) | liveness |
 | `POST /api/cron` | `x-cron-secret` | no-store | manual pipeline trigger |
 | `GET /api/clusters` | none | **edge-cached 60s** | framed stories, paginated, newest first |
+| `GET /api/search` | none | **edge-cached 60s** | search stories by key phrase / headline / lede |
+| `GET /api/clusters/:id` | none | **edge-cached 60s** | single story (shareable deep links) |
+| `GET /api/tone-radar` | none | **edge-cached 60s** | per-outlet spin share (last 200 framed) |
 | `GET /api/runs` | none | `no-store` | recent pipeline runs (event log) |
 | `GET /*` (non-API) | none | SPA shell: `no-cache` (deploys change it); hashed assets served by ASSETS with Cloudflare default caching | the React SPA |
 
@@ -207,6 +210,110 @@ Field notes:
 |---|---|---|
 | 400 | `{"error": "invalid limit/offset"}` | out-of-range/non-numeric params |
 | 500 | `{"error": "internal error"}` | D1 failure etc. |
+
+---
+
+## `GET /api/search`
+
+Search stories by substring match over the cluster **key phrase**, article
+**titles**, and article **ledes** (case-insensitive). Plain SQLite `LIKE`
+over a small table — no FTS5, no migration, no cost. **Edge-cached 60s** like
+`/api/clusters` (the query is part of the cache key).
+
+### Query parameters
+
+| Param | Range | Default | Invalid → |
+|---|---|---|---|
+| `q` | 2–100 chars (trimmed) | — | 400 |
+| `limit` | integer 1–50 | `50` | 400 |
+
+`LIKE` metacharacters (`%`, `_`, `\`) in `q` are **escaped** — user input can
+never widen the match into a wildcard scan. Short (1-char) and empty queries
+are rejected, not silently ignored.
+
+### Response `200`
+
+```json
+{
+  "query": "assad",
+  "limit": 50,
+  "hasMore": false,
+  "clusters": [ /* same shape as GET /api/clusters, newest seenAt first */ ]
+}
+```
+
+- `clusters` — full cluster objects (identical shape to `/api/clusters`,
+  including the same SSRF re-checks and `framingError` sanitization).
+- Ordering: `seenAt` descending (newest story first).
+
+### Errors
+
+| Status | Body | Meaning |
+|---|---|---|
+| 400 | `{"error": "invalid q (2-100 chars)"}` | `q` missing, too short, or too long |
+| 400 | `{"error": "invalid limit"}` | `limit` not an integer in 1–50 |
+| 500 | `{"error": "internal error"}` | D1 failure |
+
+---
+
+## `GET /api/clusters/:id`
+
+Single story by numeric id — powers the shareable deep links
+(`#/story/<id>` in the SPA). **Edge-cached 60s**.
+
+### Response `200`
+
+A single cluster object, same shape as one entry of `GET /api/clusters`.
+
+### Errors
+
+| Status | Body | Meaning |
+|---|---|---|
+| 400 | `{"error": "invalid id"}` | not a 1–10 digit integer |
+| 404 | `{"error": "not found"}` | id doesn't exist (e.g. purged after the 14-day retention) — **not cached** |
+| 500 | `{"error": "internal error"}` | D1 failure |
+
+---
+
+## `GET /api/tone-radar`
+
+Per-outlet spin share across the **last 200 framed stories**, aggregated from
+the `toneTags` the framing stage already stores — no new storage or pipeline
+work, just an aggregate read. **Edge-cached 60s**.
+
+"Spin" is defined as any non-neutral, non-analytical tone
+(`urgent | alarmist | skeptical | celebratory`).
+
+### Response `200`
+
+```json
+{
+  "computedAt": "2026-08-17T03:17:00.000Z",
+  "outlets": [
+    {
+      "source": "BBC",
+      "frames": 34,
+      "spun": 21,
+      "spinRatio": 0.6176,
+      "tones": { "neutral": 13, "celebratory": 14, "urgent": 7 }
+    }
+  ]
+}
+```
+
+- `frames` — framing tags counted for this outlet.
+- `spun` — tags with a spin tone.
+- `spinRatio` — `spun / frames` (0 when no frames).
+- `tones` — per-tone counts.
+- `outlets` is sorted by `spinRatio` descending, ties by `frames` descending.
+- Stories without a framing report contribute nothing (aggregate over framed
+  stories only).
+
+### Errors
+
+| Status | Body | Meaning |
+|---|---|---|
+| 500 | `{"error": "internal error"}` | D1 failure |
 
 ---
 
