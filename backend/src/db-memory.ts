@@ -189,7 +189,7 @@ export class MemoryDb implements Db {
       return true;
     }
     if (this.lock.token === token) return true;
-    if (this.lock.acquiredAt < now - 30 * 60_000) {
+    if (this.lock.acquiredAt < now - 15 * 60_000) {
       this.lock = { token, acquiredAt: now };
       return true;
     }

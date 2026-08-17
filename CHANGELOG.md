@@ -44,8 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run records `pipeline watchdog: stuck in stage "X"` (stage markers at
   scrape/insert/cluster/enrich/queue/frame/maintain pin down the hang) and
   releases the lock, so the next cron recovers instead of leaving a zombie
-  holding the lock for its full 30-minute lease. A stuck outbound call can
-  no longer starve the site — the worst case is one skipped slot.
+  holding the lock for its full lease. A stuck outbound call can no longer
+  starve the site — the worst case is one skipped slot.
+- **Shorter lock lease (30 → 15 min).** When the platform freezes an
+  invocation's isolate outright, no timer can fire and the watchdog is dead;
+  the D1 lock lease is the only backstop. Aug 17 2026: two consecutive
+  zombies (12:45Z, 13:15Z) each held the 30-minute lease, skipping six
+  consecutive runs until 13:45Z stole the expired lease. With the 15-minute
+  lease (still > 12-min watchdog > worst-case healthy run), a frozen zombie
+  can block the pipeline for at most ~15 minutes.
 - **Framing-only cron mode.** A second cron trigger (`7,22,37,52 * * * *`,
   `FRAMING_CRON_SCHEDULE` in `backend/src/config.ts`) runs the pipeline
   with scrape/dedup/enrich skipped and frames only the unframed retry

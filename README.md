@@ -54,7 +54,7 @@ Google News RSS (8 outlets)
 
 **Cloudflare everything.** D1 (SQLite) replaces MongoDB — the pipeline's "memory" so stories accumulate across runs and no story is framed twice. The Worker Cron Trigger replaces the GitHub Actions scheduler. One `wrangler deploy` ships DB schema, API, and SPA together.
 
-**Failure-tolerant pipeline.** The pipeline holds a D1 single-row lock (30-min lease) so overlapping runs skip instead of colliding; clusters are deduplicated by a deterministic signature (`hash(sorted article keys)`), so re-runs never duplicate rows; framing failures are recorded on the cluster and retried on the next run (3 attempts, backoff, non-retryable 4xx fails fast).
+**Failure-tolerant pipeline.** The pipeline holds a D1 single-row lock (15-min lease) so overlapping runs skip instead of colliding; clusters are deduplicated by a deterministic signature (`hash(sorted article keys)`), so re-runs never duplicate rows; framing failures are recorded on the cluster and retried on the next run (3 attempts, backoff, non-retryable 4xx fails fast).
 
 **Security posture.** `POST /api/cron` is fail-closed: with no `CRON_SECRET` configured it returns 503 — there is no default secret. Compare is constant-time, and per-IP rate limiting (default 5 per 10 min, `CRON_RATE_LIMIT`) protects the trigger. Responses carry CSP + nosniff + X-Frame-Options + Referrer-Policy headers, CORS is an explicit allowlist (`ALLOWED_ORIGINS`), and every URL served from feed data (article URLs, og:images) passes an SSRF-safe `http(s)` check (private/reserved hosts rejected). Client-facing errors are generic — Gemini error details stay in D1 for the operator.
 

@@ -135,7 +135,7 @@ frontend lint + test + build; framing-eval and cluster-eval gates; `npm audit
 - **Never bypass the Db abstraction in routes.** `index.ts` must not run SQL
   directly; it calls `resolveDb(env)`.
 - **Idempotency is a database property.** Cluster signature `sig` has a
-  unique index; pipeline lock is a single row with a 30-min lease; inserts
+  unique index; pipeline lock is a single row with a 15-min lease; inserts
   are `INSERT OR IGNORE`. Don't replace these with app-level checks.
 - **Framing JSON is validated at rest.** Same `normalizeFraming` rules on
   write (frameCluster) and read (D1Db parse) — a corrupt row is skipped, never

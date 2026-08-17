@@ -264,10 +264,10 @@ console.log("== test: pipeline lock (real CHECK constraint + lease) ==");
   await db.acquirePipelineLock("c");
   await db.releasePipelineLock("nope");
   check("wrong token cannot release", !(await db.acquirePipelineLock("d")));
-  // Expired lease stolen (backdate the row directly)
+  // Expired lease stolen (backdate the row directly; 16 min > 15-min lease)
   await (db as any).env.prepare(
     "UPDATE pipeline_lock SET acquired_at = ? WHERE id = 1"
-  ).bind(now - 31 * 60_000).run();
+  ).bind(now - 16 * 60_000).run();
   check("expired lease stolen", await db.acquirePipelineLock("e"));
 }
 

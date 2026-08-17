@@ -63,7 +63,7 @@ export interface Db {
   ): Promise<{ id: number; keyPhrase: string; articles: RawArticle[] }[]>;
   /**
    * Single-slot pipeline lock (D1 row id=1). Steals the lock when the
-   * previous holder's lease (30 min) has expired. Returns false when
+   * previous holder's lease (15 min) has expired. Returns false when
    * another run holds the lock.
    */
   acquirePipelineLock(token: string): Promise<boolean>;
@@ -447,13 +447,16 @@ export class D1Db implements Db {
     const row = results[0];
     if (!row) return true; // raced deletion; next INSERT will claim it
     if (row.token === token) return true;
-    // Lease expired (30 min)? Steal the lock.
-    if (Number(row.acquired_at) < now - 30 * 60_000) {
+    // Lease expired (15 min)? Steal the lock. The watchdog (12 min) releases
+    // the lock when the run's isolate is still alive; the lease is the
+    // backstop for platform-frozen zombies, so recovery never waits for the
+    // full lease — 15 min is the worst a stale lock can block the pipeline.
+    if (Number(row.acquired_at) < now - 15 * 60_000) {
       const stolen = await this.env
         .prepare(
           "UPDATE pipeline_lock SET token = ?, acquired_at = ? WHERE id = 1 AND acquired_at < ?"
         )
-        .bind(token, now, now - 30 * 60_000)
+        .bind(token, now, now - 15 * 60_000)
         .run();
       return (stolen.meta.changes ?? 0) > 0;
     }

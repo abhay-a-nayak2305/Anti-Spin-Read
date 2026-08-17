@@ -21,12 +21,15 @@ const FRAMING_BATCH = 3;
 // budget goes to Gemini. 14 clusters x 3 worst-case attempts (primary +
 // 2 fallback models) = 42 subrequests < 50, leaving >=8 headroom.
 const FRAMING_ONLY_BATCH = 14;
-// A run must never hold the pipeline lock for its full 30-minute lease or
-// leave a platform zombie: the watchdog aborts the run after this long and
-// records which stage it was stuck in ("stuck in stage X"). Worst-case
-// healthy runs: normal ~8 min (scrape 36 fetches x 15s worst / 4 concurrent,
-// enrich, framing), framing-only ~11.25 min (14 x 3 attempts x 45s / 3
-// concurrent) — 12 min is the safe ceiling.
+// A run must never hold the pipeline lock for its full lease or leave a
+// platform zombie: the watchdog aborts the run after this long and records
+// which stage it was stuck in ("stuck in stage X"). Worst-case healthy runs:
+// normal ~8 min (scrape 36 fetches x 15s worst / 4 concurrent, enrich,
+// framing), framing-only ~11.25 min (14 x 3 attempts x 45s / 3 concurrent) —
+// 12 min is the safe ceiling. If the platform freezes the isolate entirely
+// (timers cannot fire), the D1 lock lease (15 min, db.ts) is the backstop:
+// the next cron steals the stale lock, so a zombie can block the pipeline
+// for at most ~15 min even with the watchdog dead.
 const WATCHDOG_MS = 12 * 60_000;
 const RETENTION_DAYS = 14;
 const RUNS_RETENTION_DAYS = 90; // pipeline_runs log is bound separately
