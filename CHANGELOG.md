@@ -25,12 +25,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   yet show a "Framing…" chip on the card and a "Framing in progress" block
   in the modal (with the raw outlet-by-outlet news still readable); failed
   framings show a distinct "Framing failed — will be retried" block.
-- **Tone radar.** A "Tone radar — who's spinning?" panel under the grid
-  shows each outlet's spin share across the last 200 framed stories
-  (aggregated server-side from the existing `toneTags` — no new storage or
-  pipeline cost, 60s edge-cached `GET /api/tone-radar`). Spin = any
-  non-neutral/analytical tone; bars are sorted by spin share with per-tone
-  counts. The panel renders nothing on failure — it can never break the page.
+- **Tone radar by category.** The radar's new category chips
+  (`?category=<id>` on `GET /api/tone-radar`) narrow the aggregation to one
+  of the 8 deterministic keyword categories (scan widens 200 → 1000
+  clusters). Clicking an outlet's name navigates to its new
+  `#/outlet/<name>` page (`GET /api/outlets/:name`): that outlet's stories
+  plus its own tone stats — spin share, tone counts, coverage list.
+- **Bookmarks.** A ♥ on every card and in the story modal saves the story to
+  `localStorage` (`asr.bookmarks`, ids only — no backend, no account); a
+  `★ SAVED` chip filters the grid to saved stories (missing ones are
+  refetched by id, pruned ones skipped), and saves sync across tabs.
+- **Pipeline status footer.** A footer strip polls `GET /api/runs` and shows
+  the last run's status (`Healthy` / `Skipped` / `Pipeline error`), its age,
+  and the unframed framing backlog — the health signal that used to live
+  only in D1 is now visible on the page. Renders nothing on failure.
+- **Server-rendered share pages + SEO.** `GET /story/:id` serves full
+  OG/Twitter/JSON-LD markup (escaped, `</script>`-breakout-proof) so link
+  previews work without JS; `GET /robots.txt` (disallow `/api/`) and
+  `GET /sitemap.xml` (up to 10 000 story URLs, 6h edge-cached) tell
+  crawlers where the real pages are. Missing stories return a 404 noindex
+  page so stale links drop out of indexes.
+- **Nightly live pipeline health check.** `.github/workflows/nightly.yml`
+  gains a `pipeline-health` job
+  (`backend/scripts/check-pipeline-health.ts`): reads D1 directly and fails
+  when the newest run is > 60 min old, ≥3 consecutive runs skipped (zombie
+  lock), or the framing backlog exceeds 60 — the incident alarm for the
+  platform-freeze failure class, on the same cadence as the pipeline.
 - **Nightly regression workflow.** `.github/workflows/nightly.yml`
   (03:17 UTC daily + manual dispatch) re-runs both offline eval gates and a
   new live **feed health check** (`backend/scripts/check-feeds.ts`) that

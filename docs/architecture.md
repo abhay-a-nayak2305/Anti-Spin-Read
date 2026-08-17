@@ -186,9 +186,26 @@ it, so even a fully frozen invocation can block the pipeline for at most
 - **`GET /api/tone-radar`** — per-outlet spin share aggregated from the
   `toneTags` already stored in the last 200 framed clusters. No new
   storage or pipeline work — just an aggregate read, 60s edge-cached.
-  Powers the tone-radar panel under the grid.
-- **`GET /api/runs`** — recent pipeline runs, newest first, `Cache-Control:
-  no-store` (operators want fresh state).
+  `?category=` (one of the 8 keyword category ids) widens the scan to the
+  last 1000 clusters and aggregates only matches — the tone radar panel's
+  category chips. Powers the tone-radar panel under the grid.
+- **`GET /api/outlets/:name`** — one outlet's stories (newest first,
+  `limit` 1–50) plus its own tone stats aggregated from those clusters'
+  `toneTags`. Keyed on the canonical `articles.source`; radar tone-tag keys
+  (Gemini-derived) can differ, so an outlet page can legitimately be empty.
+  60s edge-cached. Powers the `#/outlet/<name>` view.
+- **`GET /api/runs`** — recent pipeline runs, newest first, plus `backlog`
+  (count of clusters awaiting framing), `Cache-Control: no-store`
+  (operators want fresh state). Powers the footer's pipeline status strip.
+- **`GET /story/:id`** — server-rendered OG/Twitter/JSON-LD share page so
+  crawlers and link previewers get markup without JS. All feed text is
+  HTML-escaped and the JSON-LD blob escapes `<`/`>` (a feed title containing
+  `</script>` cannot break out). Missing stories → 404 noindex page so
+  crawlers drop stale links. Edge-cached 1h.
+- **`GET /robots.txt` + `GET /sitemap.xml`** — crawler rules (disallow
+  `/api/`) and up to 10 000 story URLs (`/story/<id>`, `lastmod` = seen
+  date), both escaped, sitemap edge-cached 6h. Zero config on search
+  engines' side: the sitemap URL is emitted with the request's own origin.
 - **`POST /api/cron`** — manual pipeline trigger. Fail-closed secret auth
   (constant-time compare, 503 when `CRON_SECRET` is unset), per-IP sliding
   window rate limit (default 5 per 10 min) with `X-RateLimit-*` /
@@ -251,10 +268,18 @@ on read** (`parseFraming` skips corrupt rows at query time — never served).
   packages, both offline eval gates, npm audit, and a live pipeline e2e on
   `main` only.
 - **Nightly regression** (`.github/workflows/nightly.yml`, 03:17 UTC +
-  manual dispatch) — re-runs both offline eval gates plus a **live feed
-  health check** (`backend/scripts/check-feeds.ts`): scrapes all 18 outlets
-  and fails when fewer than 10 respond, catching silent feed-URL changes or
-  IP blocks that no offline test could. No secrets or Gemini keys involved.
+  manual dispatch) — re-runs both offline eval gates plus:
+  - a **live feed health check** (`backend/scripts/check-feeds.ts`): scrapes
+    all 18 outlets and fails when fewer than 10 respond, catching silent
+    feed-URL changes or IP blocks that no offline test could. No secrets or
+    Gemini keys involved.
+  - a **live pipeline health check** (`backend/scripts/check-pipeline-health.ts`):
+    reads D1 directly with `wrangler d1 execute` and fails when the newest
+    run is older than 60 minutes, ≥3 consecutive runs were skipped (zombie
+    lock), or the framing backlog exceeds 60 — the incident alarm for the
+    platform-freeze class of failure, running on the same cron cadence as the
+    pipeline itself. Needs `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`
+    (already used by the deploy workflow).
 
 ## Related docs
 

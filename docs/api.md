@@ -11,14 +11,18 @@ deployed origin (e.g. `https://anti-spin-read.<subdomain>.workers.dev`).
 - Route summary:
 
 | Route | Auth | Cache | Description |
-|---|---|---|---|
+|---|---|---:|---|
 | `GET /api/health` | none | no-store (not set) | liveness |
 | `POST /api/cron` | `x-cron-secret` | no-store | manual pipeline trigger |
 | `GET /api/clusters` | none | **edge-cached 60s** | framed stories, paginated, newest first |
 | `GET /api/search` | none | **edge-cached 60s** | search stories by key phrase / headline / lede |
 | `GET /api/clusters/:id` | none | **edge-cached 60s** | single story (shareable deep links) |
-| `GET /api/tone-radar` | none | **edge-cached 60s** | per-outlet spin share (last 200 framed) |
-| `GET /api/runs` | none | `no-store` | recent pipeline runs (event log) |
+| `GET /api/tone-radar` | none | **edge-cached 60s** | per-outlet spin share (last 200 framed; `?category=` narrows the scan to 1000) |
+| `GET /api/outlets/:name` | none | **edge-cached 60s** | stories covered by one outlet + its tone stats |
+| `GET /api/runs` | none | `no-store` | recent pipeline runs (event log) + framing backlog |
+| `GET /story/:id` | none | **edge-cached 3600s** | server-rendered OG share page for social/link previews |
+| `GET /robots.txt` | none | `public, max-age=3600` | crawler rules (disallow `/api/`) |
+| `GET /sitemap.xml` | none | **edge-cached 21600s** | story URLs for search engines (max 10 000) |
 | `GET /*` (non-API) | none | SPA shell: `no-cache` (deploys change it); hashed assets served by ASSETS with Cloudflare default caching | the React SPA |
 
 Any `/api/*` path that matches no route returns `404 {"error": "not found"}`.
@@ -284,11 +288,22 @@ work, just an aggregate read. **Edge-cached 60s**.
 "Spin" is defined as any non-neutral, non-analytical tone
 (`urgent | alarmist | skeptical | celebratory`).
 
+### Query parameters
+
+| Param | Range | Default | Invalid → |
+|---|---|---|---|
+| `category` | one of `politics \| world \| business \| tech \| science-health \| crime-justice \| culture-sport \| other` | *unset (all)* | 400 |
+
+With `?category=`, the scan widens from 200 to **1000** latest clusters and
+only clusters whose deterministic keyword category (`categorizeCluster`)
+matches are aggregated.
+
 ### Response `200`
 
 ```json
 {
   "computedAt": "2026-08-17T03:17:00.000Z",
+  "category": "culture-sport",
   "outlets": [
     {
       "source": "BBC",
@@ -301,6 +316,7 @@ work, just an aggregate read. **Edge-cached 60s**.
 }
 ```
 
+- `category` — echoes the query param, or `null` when unset.
 - `frames` — framing tags counted for this outlet.
 - `spun` — tags with a spin tone.
 - `spinRatio` — `spun / frames` (0 when no frames).
@@ -313,6 +329,59 @@ work, just an aggregate read. **Edge-cached 60s**.
 
 | Status | Body | Meaning |
 |---|---|---|
+| 400 | `{"error": "invalid category"}` | unknown category id |
+| 500 | `{"error": "internal error"}` | D1 failure |
+
+---
+
+## `GET /api/outlets/:name`
+
+Per-outlet page: clusters covered by one outlet, newest `seenAt` first, plus
+the outlet's own tone stats aggregated from those clusters' `toneTags`.
+**Edge-cached 60s.**
+
+> **Keying caveat.** Clusters are matched on the canonical `articles[].source`
+> label, while the radar's `toneTags[].source` keys come from Gemini and can
+> differ (e.g. "The Hill (first instance)"). A tone-tag key with no matching
+> article source simply yields an empty page — by design, not an error.
+
+### Query parameters
+
+| Param | Range | Default | Invalid → |
+|---|---|---|---|
+| `limit` | integer 1–50 | `50` | 400 |
+
+### Response `200`
+
+```json
+{
+  "outlet": "BBC",
+  "hasMore": false,
+  "stat": {
+    "source": "BBC",
+    "frames": 3,
+    "spun": 2,
+    "spinRatio": 0.6667,
+    "tones": { "neutral": 1, "celebratory": 2 }
+  },
+  "clusters": [ /* same shape as GET /api/clusters */ ]
+}
+```
+
+- `stat` — tone aggregate for this outlet across the returned clusters
+  (only clusters with a framing report count). Unknown outlets return a
+  zero-filled stat (`frames: 0, spun: 0, spinRatio: 0, tones: {}`), not a 404.
+- `hasMore` — `true` when more than `limit` clusters exist (fetched with
+  `limit+1`; no count query).
+- `clusters` — full cluster objects (identical shape to `/api/clusters`,
+  including SSRF re-checks and `framingError` sanitization).
+
+### Errors
+
+| Status | Body | Meaning |
+|---|---|---|
+| 400 | `{"error": "invalid outlet name"}` | missing or > 100 chars |
+| 400 | `{"error": "invalid limit"}` | `limit` not an integer in 1–50 |
 | 500 | `{"error": "internal error"}` | D1 failure |
 
 ---
@@ -346,12 +415,16 @@ migration 0005), newest first. **Not cached** — `Cache-Control: no-store`
       "skipped": 0,
       "error": null
     }
-  ]
+  ],
+  "backlog": 7
 }
 ```
 
 - `error` — `null` on success; a truncated (≤ 500 chars) message on failure.
   Skips (`skipped: 1`) record all-zero counters and no error.
+- `backlog` — count of clusters waiting for framing (no `framing` yet,
+  including ones whose framing failed and are queued for retry). Powers the
+  SPA footer's pipeline status strip.
 
 ### Errors
 
@@ -359,6 +432,43 @@ migration 0005), newest first. **Not cached** — `Cache-Control: no-store`
 |---|---|---|
 | 400 | `{"error": "invalid limit"}` | `limit` not an integer in 1–20 |
 | 500 | `{"error": "internal error"}` | D1 failure |
+
+---
+
+## `GET /story/:id` — server-rendered share page
+
+Social/link-preview page for a story (`<title>`, OG, Twitter Card, JSON-LD
+`NewsArticle`). Served by the Worker (not the SPA) so **crawlers and link
+previewers get real markup without JavaScript**. **Edge-cached 3600s**
+(`Cache-Control: public, max-age=3600`).
+
+- `id` must be a 1–10 digit integer (else the page below returns).
+- Renders the neutral summary (or first lede) as the description, the first
+  article's image (SSRF-gated by `isSafeHttpUrl`) as `og:image`, and the
+  coverage list as visible links.
+- All feed-derived text is HTML-escaped; the JSON-LD blob escapes `<`/`>`
+  so feed titles containing `</script>` cannot break out of the script tag.
+- Missing/pruned ids return a **404 noindex page** ("story no longer
+  available") so crawlers drop stale links — never a soft-200.
+
+## `GET /robots.txt`
+
+```
+User-agent: *
+Allow: /
+Disallow: /api/
+Sitemap: <origin>/sitemap.xml
+```
+
+`Cache-Control: public, max-age=3600`. The sitemap URL uses the request's own
+origin (works on the deployed domain and in local dev).
+
+## `GET /sitemap.xml`
+
+`<urlset>` of up to 10 000 story URLs (`<loc><origin>/story/<id></loc>` +
+`<lastmod>` = seen date), newest first. **Edge-cached 21600s** (6 hours).
+`Content-Type: application/xml`. Escaping is identical to the story page —
+feed text can never inject markup into the XML.
 
 ---
 

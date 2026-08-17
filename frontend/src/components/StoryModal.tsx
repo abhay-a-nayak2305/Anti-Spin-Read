@@ -74,9 +74,15 @@ function Section({
 export function StoryModal({
   cluster,
   onClose,
+  saved = false,
+  onToggleSave,
 }: {
   cluster: Cluster;
   onClose: () => void;
+  /** Story is in the reader's saved bookmarks. */
+  saved?: boolean;
+  /** Wired by App — omitted in tests and standalone usage → no heart button. */
+  onToggleSave?: (c: Cluster) => void;
 }) {
   const f = cluster.framing;
   const sourceCount = cluster.articles.length;
@@ -162,6 +168,20 @@ export function StoryModal({
               <span className={`stamp ${meta.stamp} text-[11px]`}>
                 {meta.label}
               </span>
+              {onToggleSave && (
+                <button
+                  type="button"
+                  onClick={() => onToggleSave(cluster)}
+                  aria-label={saved ? "Unsave story" : "Save story"}
+                  aria-pressed={saved}
+                  title={saved ? "Unsave story" : "Save story"}
+                  className={`border-none bg-transparent p-0 text-[11px] leading-none transition-colors hover:text-alarm ${
+                    saved ? "text-alarm" : "text-ink/40"
+                  }`}
+                >
+                  ♥
+                </button>
+              )}
               <SourceCountBadge count={sourceCount} className="gap-1.5" />
               <span className="text-[11px] uppercase tracking-widest text-ink/60">
                 {timeAgo(cluster.seenAt)}

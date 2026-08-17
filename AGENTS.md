@@ -22,12 +22,16 @@ backend/                 Cloudflare Worker (Hono + TypeScript) — API + pipelin
   src/categorize.ts      deterministic keyword categorization (no LLM)
   src/rate-limit.ts      in-memory sliding-window rate limiter
   migrations/            versioned SQL (0001–0005) applied by wrangler + test harness
-  scripts/               test suites, evals, seeders, sqlite-d1.ts (D1 test harness)
+  scripts/               test suites, evals, seeders, sqlite-d1.ts (D1 test harness),
+                         check-feeds.ts + check-pipeline-health.ts (nightly live checks)
   wrangler.jsonc         Worker config: D1 binding, ASSETS, cron trigger, vars
 frontend/                React + Vite + Tailwind SPA (built into Worker assets)
-  src/                   App, components, hooks (useClusters polling/pagination), types
+  src/                   App, components, hooks (useClusters polling/pagination,
+                         useBookmarks localStorage saves), types
   tests/                 Playwright UI smoke test (ui_test.py)
-.github/workflows/       ci.yml (tests + eval gates + audit + live e2e), deploy.yml
+.github/workflows/       ci.yml (tests + eval gates + audit + live e2e),
+                         deploy.yml, nightly.yml (03:17 UTC evals + live feed +
+                         live pipeline health checks)
 .github/dependabot.yml   weekly npm / monthly actions updates
 docs/                    architecture.md, api.md, adr/0001–0003
 CHANGELOG.md             keep-a-changelog format
@@ -50,6 +54,7 @@ npx tsx scripts/eval-cluster.ts   # clustering eval gate (bilingual corpus)
 npm run migrate:local    # apply D1 migrations to local DB
 npm run migrate:remote   # apply D1 migrations to remote DB (deploy workflow does this)
 npm run dev              # wrangler dev (:8787)
+npx tsx scripts/check-pipeline-health.ts   # live D1 health check (nightly job)
 ```
 
 Frontend (run from `frontend/`):
@@ -60,9 +65,18 @@ npm run lint             # oxlint
 npm run build            # tsc -b && vite build → dist/ (served by the Worker's ASSETS)
 ```
 
+Playwright UI smoke test (needs both servers; see
+`frontend/tests/ui_test.py` docstring for the exact `with_server.py`
+invocation — two servers, seeded API on :4321, Vite on :5173).
+
 CI (`.github/workflows/ci.yml`) runs: backend typecheck + `npm test`;
 frontend lint + test + build; framing-eval and cluster-eval gates; `npm audit
 --audit-level=high` on both packages; and a live pipeline e2e on `main` only.
+
+`nightly.yml` (03:17 UTC + manual dispatch) re-runs the eval gates, the live
+feed check (`check-feeds.ts`), and the live pipeline health check
+(`check-pipeline-health.ts` — reads D1 via `wrangler d1 execute`; needs
+`CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` GitHub secrets).
 
 ## Eval gates (do not weaken)
 
@@ -122,6 +136,11 @@ frontend lint + test + build; framing-eval and cluster-eval gates; `npm audit
 - **Client-facing errors are generic.** Real Gemini error details live in D1
   (`framing_error`) for the operator; the API serves `"Framing failed"` or
   `{"error": "internal error"}`.
+- **Feed text is escaped in every server-rendered surface** (`/story/:id`,
+  `/sitemap.xml`): HTML-escape all feed-derived strings, and escape `<`/`>`
+  inside the JSON-LD script blob — a feed title containing `</script>` must
+  never break out of the markup. The escaping tests in `test-api.ts` cover
+  this; keep them.
 
 ## Architecture rules
 

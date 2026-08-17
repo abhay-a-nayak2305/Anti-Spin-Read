@@ -142,6 +142,31 @@ export class MemoryDb implements Db {
     return c ? this.toRecord(c) : null;
   }
 
+  async clustersByOutlet(
+    source: string,
+    limit: number,
+    offset = 0
+  ): Promise<ClusterRecord[]> {
+    return this.clusters
+      .filter((c) =>
+        c.articleKeys.some((k) => this.articles.get(k)?.source === source)
+      )
+      .sort((a, b) => b.seenAt.getTime() - a.seenAt.getTime())
+      .slice(offset, offset + limit)
+      .map((c) => this.toRecord(c));
+  }
+
+  async sitemapMeta(limit: number): Promise<{ id: string; seenAt: Date }[]> {
+    return [...this.clusters]
+      .sort((a, b) => b.seenAt.getTime() - a.seenAt.getTime())
+      .slice(0, limit)
+      .map((c) => ({ id: String(c.id), seenAt: c.seenAt }));
+  }
+
+  async framingBacklogCount(): Promise<number> {
+    return this.clusters.filter((c) => c.framing === null).length;
+  }
+
   /** Map an internal cluster to its public record shape (parity with D1Db). */
   private toRecord(c: {
     id: number;

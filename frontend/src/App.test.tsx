@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { Cluster } from "./types";
+import type { Cluster, OutletResponse } from "./types";
 
 const fetchMock = vi.fn();
 
@@ -188,5 +188,199 @@ describe("App — deep links", () => {
     await waitFor(() =>
       expect(screen.queryByText(/pruned after 14 days/i)).not.toBeInTheDocument()
     );
+  });
+});
+
+describe("App — saved bookmarks", () => {
+  it("shows the SAVED chip with the bookmark count", async () => {
+    routeFetchMock();
+    render(<App />);
+    await screen.findByText("Story a");
+
+    // No bookmarks yet — chip without a count.
+    const chip = screen.getByRole("button", { name: "★ SAVED" });
+    expect(chip).toBeInTheDocument();
+    expect(chip).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("filters to saved stories only and hides the radar", async () => {
+    // One saved story ("a"); the feed also carries an unsaved one ("b").
+    localStorage.setItem("asr.bookmarks", '["a"]');
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes("/api/tone-radar")) {
+        return Promise.resolve(
+          jsonResponse({ computedAt: "2026-08-15T12:00:00Z", outlets: [] })
+        );
+      }
+      return Promise.resolve(
+        jsonResponse({
+          limit: 50,
+          offset: 0,
+          hasMore: false,
+          clusters: [
+            makeCluster("a", "2026-08-15T10:00:00Z"),
+            makeCluster("b", "2026-08-15T11:00:00Z"),
+          ],
+        })
+      );
+    });
+    render(<App />);
+    await screen.findByText("Story a");
+    expect(screen.getByText("Story b")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "★ SAVED 1" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Story b")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("Story a")).toBeInTheDocument();
+    // The radar is a home-view feature — hidden in the SAVED view.
+    expect(screen.queryByText(/Tone radar/)).not.toBeInTheDocument();
+  });
+
+  it("keeps SAVED out of the URL query string", async () => {
+    // Enter with a category filter active, then switch to SAVED.
+    window.history.replaceState(null, "", "?category=world");
+    routeFetchMock();
+    render(<App />);
+    await screen.findByText("Story a");
+    expect(window.location.search).toBe("?category=world");
+
+    fireEvent.click(screen.getByRole("button", { name: "★ SAVED" }));
+    expect(window.location.search).toBe("");
+    expect(window.location.hash).toBe("");
+  });
+
+  it("shows the empty hint when nothing is saved", async () => {
+    routeFetchMock();
+    render(<App />);
+    await screen.findByText("Story a");
+
+    fireEvent.click(screen.getByRole("button", { name: "★ SAVED" }));
+    expect(await screen.findByText("Nothing saved yet")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Tap the ♥ on any story to bookmark it/)
+    ).toBeInTheDocument();
+  });
+
+  it("says saved stories expired when all bookmarks are pruned", async () => {
+    // Saved id "ghost" is not in the feed and 404s on the individual fetch.
+    localStorage.setItem("asr.bookmarks", '["ghost"]');
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes("/api/tone-radar")) {
+        return Promise.resolve(
+          jsonResponse({ computedAt: "2026-08-15T12:00:00Z", outlets: [] })
+        );
+      }
+      if (url.includes("/api/clusters/ghost")) {
+        return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+      }
+      return Promise.resolve(
+        jsonResponse({
+          limit: 50,
+          offset: 0,
+          hasMore: false,
+          clusters: [makeCluster("a", "2026-08-15T10:00:00Z")],
+        })
+      );
+    });
+    render(<App />);
+    await screen.findByText("Story a");
+
+    fireEvent.click(screen.getByRole("button", { name: "★ SAVED 1" }));
+    expect(
+      await screen.findByText(/Saved stories have expired/i)
+    ).toBeInTheDocument();
+  });
+});
+
+describe("App — outlet route", () => {
+  /** OutletResponse fixture for /api/outlets/BBC. */
+  const bbcResponse: OutletResponse = {
+    outlet: "BBC",
+    hasMore: false,
+    stat: { source: "BBC", frames: 2, spun: 1, spinRatio: 0.5, tones: { neutral: 2 } },
+    clusters: [
+      {
+        ...makeCluster("o1", "2026-08-15T10:30:00Z"),
+        keyPhrase: "BBC exclusive story",
+        framing: {
+          headlineDeltas: [],
+          toneTags: [{ source: "BBC", tone: "neutral" }],
+          notableOmissions: [],
+          neutralSummary: "Summary.",
+        },
+      },
+    ],
+  };
+
+  function outletRouteMock() {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes("/api/tone-radar")) {
+        return Promise.resolve(
+          jsonResponse({ computedAt: "2026-08-15T12:00:00Z", outlets: [] })
+        );
+      }
+      if (url.includes("/api/outlets/BBC")) {
+        return Promise.resolve(jsonResponse(bbcResponse));
+      }
+      if (url.includes("/api/clusters/42")) {
+        return Promise.resolve(jsonResponse(makeCluster("42", "2026-08-15T10:30:00Z")));
+      }
+      return Promise.resolve(
+        jsonResponse({
+          limit: 50,
+          offset: 0,
+          hasMore: false,
+          clusters: [makeCluster("a", "2026-08-15T10:00:00Z")],
+        })
+      );
+    });
+  }
+
+  it("renders OutletView instead of the feed, radar and filters for #/outlet/<name>", async () => {
+    window.history.replaceState(null, "", "#/outlet/BBC");
+    outletRouteMock();
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "BBC" })).toBeInTheDocument();
+    expect(screen.getByText("2 framed stories · 1 spun (50%)")).toBeInTheDocument();
+    expect(await screen.findByText("BBC exclusive story")).toBeInTheDocument();
+    // Main view elements are replaced, not layered on top.
+    expect(screen.queryByText("Story a")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tone radar/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: /filter stories by category/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens a story from the outlet view and returns to the outlet on close", async () => {
+    window.history.replaceState(null, "", "#/outlet/BBC");
+    outletRouteMock();
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("BBC exclusive story"));
+    const dialog = await screen.findByRole("dialog", { name: "BBC exclusive story" });
+    expect(dialog).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close story details" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // The hash points back at the outlet, and the outlet view is still there.
+    expect(window.location.hash).toBe("#/outlet/BBC");
+    expect(screen.getByRole("heading", { name: "BBC" })).toBeInTheDocument();
+  });
+
+  it("leaves the outlet view when the hash no longer matches", async () => {
+    window.history.replaceState(null, "", "#/outlet/BBC");
+    outletRouteMock();
+    render(<App />);
+    await screen.findByRole("heading", { name: "BBC" });
+
+    // Simulate the user pressing Back out of the hash link.
+    window.location.hash = "";
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "BBC" })).not.toBeInTheDocument()
+    );
+    expect(screen.getByText("Story a")).toBeInTheDocument();
   });
 });

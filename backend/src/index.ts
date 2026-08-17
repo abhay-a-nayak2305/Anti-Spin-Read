@@ -7,7 +7,7 @@ import type {
 import { D1Db } from "./db.js";
 import { runPipeline } from "./pipeline.js";
 import { workerConfig, allowedOrigins, FRAMING_CRON_SCHEDULE } from "./config.js";
-import { categorizeCluster } from "./categorize.js";
+import { categorizeCluster, CATEGORY_IDS } from "./categorize.js";
 import { isSafeHttpUrl } from "./images.js";
 import { createSlidingWindowLimiter } from "./rate-limit.js";
 import type { Db } from "./db.js";
@@ -17,6 +17,13 @@ const RATE_WINDOW_MS = 10 * 60_000;
 
 /** Tone radar aggregates toneTags over the last N framed clusters. */
 const RADAR_CLUSTERS = 200;
+/**
+ * Category-filtered radar scans more clusters so smaller categories still
+ * get a meaningful sample (categorizeCluster is cheap keyword scoring).
+ */
+const RADAR_CATEGORY_SCAN = 1000;
+/** Sitemap caps at 10k URLs (14-day retention keeps the real count far lower). */
+const SITEMAP_MAX = 10_000;
 
 /**
  * Constant-time string compare (no early exit on byte mismatch).
@@ -65,6 +72,71 @@ function toApiCluster(cl: ClusterRecord) {
       imageUrl: isSafeHttpUrl(a.imageUrl) ? a.imageUrl : "",
     })),
   };
+}
+
+/** Escape text for embedding in HTML/XML (OG page, sitemap). */
+function esc(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Per-outlet tone aggregation shared by the radar and outlet routes. */
+function aggregateToneTags(clusters: ClusterRecord[]) {
+  const outlets = new Map<
+    string,
+    { source: string; frames: number; spun: number; tones: Record<string, number> }
+  >();
+  for (const cl of clusters) {
+    if (!cl.framing) continue;
+    for (const t of cl.framing.toneTags) {
+      let o = outlets.get(t.source);
+      if (!o) {
+        o = { source: t.source, frames: 0, spun: 0, tones: {} };
+        outlets.set(t.source, o);
+      }
+      o.frames++;
+      o.tones[t.tone] = (o.tones[t.tone] ?? 0) + 1;
+      // Spin = any non-neutral, non-analytical tone (urgent/alarmist/
+      // skeptical/celebratory — anything that colors the framing).
+      if (t.tone !== "neutral" && t.tone !== "analytical") o.spun++;
+    }
+  }
+  return [...outlets.values()]
+    .map((o) => ({
+      ...o,
+      spinRatio: o.frames > 0 ? o.spun / o.frames : 0,
+    }))
+    .sort((a, b) => b.spinRatio - a.spinRatio || b.frames - a.frames);
+}
+
+/** Best available one-line description for a cluster (OG meta). */
+function ogDescription(cl: ClusterRecord): string {
+  if (cl.framing?.neutralSummary) return cl.framing.neutralSummary;
+  const lede = cl.articles.find((a) => a.lede.trim());
+  if (lede) return lede.lede;
+  return cl.keyPhrase;
+}
+
+/** Small noindex page for purged/invalid story links (crawler-safe 404). */
+function notFoundPage(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex">
+<title>Story not found — The Anti-Spin Read</title>
+<style>body{font-family:system-ui,sans-serif;max-width:44rem;margin:0 auto;padding:2rem 1rem;color:#222;background:#fdfdfb}a{color:#0a5c46}</style>
+</head>
+<body>
+<p><a href="/">← The Anti-Spin Read</a></p>
+<h1>This story link is no longer available</h1>
+<p>Stories are pruned after 14 days — try the homepage for current coverage.</p>
+</body>
+</html>`;
 }
 
 /** Edge-cache read: hit -> a mutable copy of the cached Response, else null. */
@@ -327,51 +399,80 @@ export function createApp(db?: Db) {
     }
   });
 
-  // Tone radar: per-outlet spin share across the last 200 framed clusters,
+  // Tone radar: per-outlet spin share across the last 200 framed clusters
+  // (1000 when ?category= filters by the deterministic keyword category),
   // aggregated from the toneTags the framing stage already stores. No new
-  // storage or pipeline work — just an aggregate read, 60s edge-cached.
+  // storage or pipeline work — just aggregate reads, 60s edge-cached.
   app.get("/api/tone-radar", async (c) => {
     try {
+      const rawCategory = c.req.query("category");
+      let category: string | null = null;
+      if (rawCategory !== undefined && rawCategory !== null && rawCategory !== "") {
+        if (!CATEGORY_IDS.includes(rawCategory as (typeof CATEGORY_IDS)[number])) {
+          return c.json({ error: "invalid category" }, 400);
+        }
+        category = rawCategory;
+      }
       const cached = await edgeCacheHit(c.req.url);
       if (cached) return cached;
-      const rows = await resolveDb(c.env).latestClusters(RADAR_CLUSTERS);
-      const outlets = new Map<
-        string,
-        {
-          source: string;
-          frames: number;
-          spun: number;
-          tones: Record<string, number>;
-        }
-      >();
-      for (const cl of rows) {
-        if (!cl.framing) continue;
-        for (const t of cl.framing.toneTags) {
-          let o = outlets.get(t.source);
-          if (!o) {
-            o = { source: t.source, frames: 0, spun: 0, tones: {} };
-            outlets.set(t.source, o);
-          }
-          o.frames++;
-          o.tones[t.tone] = (o.tones[t.tone] ?? 0) + 1;
-          // Spin = any non-neutral, non-analytical tone (urgent/alarmist/
-          // skeptical/celebratory — anything that colors the framing).
-          if (t.tone !== "neutral" && t.tone !== "analytical") o.spun++;
-        }
-      }
-      const list = [...outlets.values()]
-        .map((o) => ({
-          ...o,
-          spinRatio: o.frames > 0 ? o.spun / o.frames : 0,
-        }))
-        .sort((a, b) => b.spinRatio - a.spinRatio || b.frames - a.frames);
+      const rows = await resolveDb(c.env).latestClusters(
+        category ? RADAR_CATEGORY_SCAN : RADAR_CLUSTERS
+      );
+      const forAgg = category
+        ? rows.filter((cl) => categorizeCluster(cl) === category)
+        : rows;
+      const list = aggregateToneTags(forAgg);
       c.header("Cache-Control", "public, max-age=60");
-      const res = c.json({ computedAt: new Date().toISOString(), outlets: list });
+      const res = c.json({
+        computedAt: new Date().toISOString(),
+        category,
+        outlets: list,
+      });
       const put = edgeCachePut(c.req.url, res);
       if (put) c.executionCtx.waitUntil(put);
       return res;
     } catch (err) {
       console.error("[api] tone-radar failed:", err);
+      return c.json({ error: "internal error" }, 500);
+    }
+  });
+
+  // Per-outlet page: clusters covered by one outlet, newest first, plus the
+  // outlet's own tone stats aggregated from those clusters' toneTags.
+  // Keyed on the canonical article source label; the radar's toneTag keys
+  // (Gemini-derived) can differ — a mismatch simply yields an empty list.
+  app.get("/api/outlets/:name", async (c) => {
+    try {
+      const rawName = c.req.param("name");
+      if (!rawName || rawName.length > 100) {
+        return c.json({ error: "invalid outlet name" }, 400);
+      }
+      const rawLimit = Number(c.req.query("limit") ?? "50");
+      const limit =
+        Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 50
+          ? rawLimit
+          : null;
+      if (limit === null) {
+        return c.json({ error: "invalid limit" }, 400);
+      }
+      const cached = await edgeCacheHit(c.req.url);
+      if (cached) return cached;
+      const rows = await resolveDb(c.env).clustersByOutlet(rawName, limit + 1);
+      const hasMore = rows.length > limit;
+      const framedRows = rows.filter((cl) => cl.framing);
+      const stat = aggregateToneTags(framedRows).find((o) => o.source === rawName);
+      c.header("Cache-Control", "public, max-age=60");
+      const res = c.json({
+        outlet: rawName,
+        hasMore,
+        stat: stat ?? { source: rawName, frames: 0, spun: 0, tones: {}, spinRatio: 0 },
+        clusters: rows.slice(0, limit).map(toApiCluster),
+      });
+      const put = edgeCachePut(c.req.url, res);
+      if (put) c.executionCtx.waitUntil(put);
+      return res;
+    } catch (err) {
+      console.error("[api] outlets failed:", err);
       return c.json({ error: "internal error" }, 500);
     }
   });
@@ -389,6 +490,7 @@ export function createApp(db?: Db) {
         return c.json({ error: "invalid limit" }, 400);
       }
       const runs = await resolveDb(c.env).latestPipelineRuns(limit);
+      const backlog = await resolveDb(c.env).framingBacklogCount();
       c.header("Cache-Control", "no-store");
       return c.json({
         runs: runs.map((r) => ({
@@ -403,10 +505,143 @@ export function createApp(db?: Db) {
           skipped: r.skipped,
           error: r.error,
         })),
+        backlog,
       });
     } catch (err) {
       console.error("[api] runs failed:", err);
       return c.json({ error: "internal error" }, 500);
+    }
+  });
+
+  // Server-rendered share page: crawlers (X, WhatsApp, Slack) ignore URL
+  // hashes, so #/story/<id> links open blank there. /story/<id> is the
+  // crawlable twin: minimal HTML + OpenGraph/Twitter tags + JSON-LD, built
+  // from D1 alone (no LLM call), long edge-cached. Crawlers don't enforce
+  // the SPA CSP, so the inline JSON-LD script is safe for them.
+  app.get("/story/:id", async (c) => {
+    try {
+      const rawId = c.req.param("id");
+      if (!/^\d{1,10}$/.test(rawId)) {
+        return c.html(notFoundPage(), 404);
+      }
+      const cached = await edgeCacheHit(c.req.url);
+      if (cached) return cached;
+      const row = await resolveDb(c.env).clusterById(rawId);
+      if (!row) {
+        return c.html(notFoundPage(), 404);
+      }
+      const origin = new URL(c.req.url).origin;
+      const url = `${origin}/story/${rawId}`;
+      const title = row.keyPhrase;
+      const description = ogDescription(row).slice(0, 300);
+      const image =
+        row.articles.find((a) => a.imageUrl && isSafeHttpUrl(a.imageUrl))
+          ?.imageUrl ?? null;
+      const seenIso = row.seenAt.toISOString();
+      const page = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${esc(title)} — The Anti-Spin Read</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="${esc(description)}">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="The Anti-Spin Read">
+<meta property="og:title" content="${esc(title)}">
+<meta property="og:description" content="${esc(description)}">
+<meta property="og:url" content="${esc(url)}">
+${image ? `<meta property="og:image" content="${esc(image)}">` : ""}
+<meta name="twitter:card" content="${image ? "summary_large_image" : "summary"}">
+<meta name="twitter:title" content="${esc(title)}">
+<meta name="twitter:description" content="${esc(description)}">
+<link rel="canonical" href="${esc(url)}">
+<script type="application/ld+json">
+${JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "NewsArticle",
+  headline: title,
+  description,
+  url,
+  image: image ? [image] : undefined,
+  datePublished: seenIso,
+  dateModified: row.framedAt?.toISOString() ?? seenIso,
+  publisher: { "@type": "Organization", name: "The Anti-Spin Read" },
+})
+  // Feed titles are untrusted: `</script>` inside the JSON would close the
+  // tag in the HTML parser. JSON.stringify doesn't escape `<`/`>`, so the
+  // JSON-LD payload is hardened with explicit unicode escapes.
+  .replace(/</g, "\\u003c")
+  .replace(/>/g, "\\u003e")}
+</script>
+<style>body{font-family:system-ui,sans-serif;max-width:44rem;margin:0 auto;padding:2rem 1rem;color:#222;background:#fdfdfb}a{color:#0a5c46}h1{font-size:1.6rem;line-height:1.25}time{color:#666;font-size:.85rem}p{line-height:1.55}ul{padding-left:1.2rem}</style>
+</head>
+<body>
+<main>
+  <p><a href="/">← The Anti-Spin Read</a></p>
+  <h1>${esc(title)}</h1>
+  <p><time datetime="${esc(seenIso)}">${esc(seenIso)}</time>
+    ${row.framedAt ? `· <time datetime="${esc(row.framedAt.toISOString())}">framed ${esc(row.framedAt.toISOString())}</time>` : ""}
+    · ${row.articles.length} ${row.articles.length === 1 ? "outlet" : "outlets"} covered</p>
+  ${description ? `<p>${esc(description)}</p>` : ""}
+  <h2>Coverage</h2>
+  <ul>
+${row.articles
+  .map(
+    (a) =>
+      `    <li><strong>${esc(a.source)}</strong> — <a href="${esc(a.url && isSafeHttpUrl(a.url) ? a.url : "")}" rel="noopener">${esc(a.title)}</a></li>`
+  )
+  .join("\n")}
+  </ul>
+</main>
+</body>
+</html>`;
+      c.header("Cache-Control", "public, max-age=3600");
+      const res = c.html(page);
+      const put = edgeCachePut(c.req.url, res);
+      if (put) c.executionCtx.waitUntil(put);
+      return res;
+    } catch (err) {
+      console.error("[story] page failed:", err);
+      return c.html(notFoundPage(), 404);
+    }
+  });
+
+  // SEO / crawler plumbing.
+  app.get("/robots.txt", async (c) => {
+    const origin = new URL(c.req.url).origin;
+    c.header("Cache-Control", "public, max-age=3600");
+    return c.text(
+      `User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${origin}/sitemap.xml\n`
+    );
+  });
+
+  app.get("/sitemap.xml", async (c) => {
+    try {
+      const cached = await edgeCacheHit(c.req.url);
+      if (cached) return cached;
+      const origin = new URL(c.req.url).origin;
+      const rows = await resolveDb(c.env).sitemapMeta(SITEMAP_MAX);
+      const urls = rows
+        .map((r) => {
+          const lastmod = r.seenAt.toISOString().slice(0, 10);
+          return `  <url><loc>${esc(origin)}/story/${esc(r.id)}</loc><lastmod>${lastmod}</lastmod></url>`;
+        })
+        .join("\n");
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls}
+</urlset>
+`;
+      c.header("Cache-Control", "public, max-age=21600");
+      const res = c.body(xml, 200, {
+        "Content-Type": "application/xml; charset=utf-8",
+      });
+      const put = edgeCachePut(c.req.url, res);
+      if (put) c.executionCtx.waitUntil(put);
+      return res;
+    } catch (err) {
+      console.error("[sitemap] failed:", err);
+      return c.text("", 500);
     }
   });
 

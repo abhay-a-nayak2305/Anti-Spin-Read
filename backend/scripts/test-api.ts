@@ -308,6 +308,125 @@ async function main() {
     check("sorted by spinRatio desc", outlets[0].source === "BBC");
   }
 
+  console.log("== test: GET /api/tone-radar?category= ==");
+  {
+    const r = await api("/api/tone-radar?category=culture-sport");
+    check("200", r.status === 200);
+    check("category echoed", r.json?.category === "culture-sport");
+    const sport = r.json?.outlets ?? [];
+    check("only culture-sport outlets (AP+BBC, no CNN)", sport.length === 2 && !sport.some((o: any) => o.source === "CNN"));
+    const ap = sport.find((o: any) => o.source === "AP");
+    check("AP: 2 frames, 1 spun (world-cup frame is neutral)", ap?.frames === 2 && ap?.spun === 1 && ap?.tones?.neutral === 1);
+
+    const crime = await api("/api/tone-radar?category=crime-justice");
+    const crimeOutlets = crime.json?.outlets ?? [];
+    check("crime-justice: 3 outlets", crimeOutlets.length === 3);
+    const bbc = crimeOutlets.find((o: any) => o.source === "BBC");
+    check("BBC there: 1 neutral frame, not spun", bbc?.frames === 1 && bbc?.spun === 0);
+
+    const world = await api("/api/tone-radar?category=world");
+    check("empty category -> empty list", world.json?.outlets?.length === 0 && world.status === 200);
+    const bogus = await api("/api/tone-radar?category=bogus");
+    check("invalid category -> 400", bogus.status === 400);
+  }
+
+  console.log("== test: GET /api/outlets/:name ==");
+  {
+    const bbc = await api("/api/outlets/BBC");
+    check("200", bbc.status === 200);
+    check("BBC covered in 3 clusters", bbc.json?.clusters?.length === 3);
+    check("full cluster shape", bbc.json?.clusters?.every((c: any) => Array.isArray(c.articles)));
+    check("stat: 3 frames, 2 spun", bbc.json?.stat?.frames === 3 && bbc.json?.stat?.spun === 2);
+    check("spinRatio 2/3", Math.abs((bbc.json?.stat?.spinRatio ?? 0) - 2 / 3) < 1e-9);
+    check("tones tracked", bbc.json?.stat?.tones?.celebratory === 2 && bbc.json?.stat?.tones?.neutral === 1);
+
+    const reuters = await api("/api/outlets/Reuters");
+    check("Reuters in 2 clusters, 0 spun", reuters.json?.clusters?.length === 2 && reuters.json?.stat?.spun === 0);
+
+    const none = await api("/api/outlets/NonexistentOutlet");
+    check("unknown outlet -> empty list + zero stat", none.json?.clusters?.length === 0 && none.json?.stat?.frames === 0 && none.json?.stat?.spinRatio === 0);
+
+    const paged = await api("/api/outlets/BBC?limit=1");
+    check("limit honored + hasMore", paged.json?.clusters?.length === 1 && paged.json?.hasMore === true);
+
+    const badLimit = await api("/api/outlets/BBC?limit=99");
+    check("invalid limit -> 400", badLimit.status === 400);
+    const badName = await api(`/api/outlets/${"x".repeat(101)}`);
+    check("overlong name -> 400", badName.status === 400);
+    check("cache-control public", bbc.headers.get("cache-control") === "public, max-age=60");
+  }
+
+  console.log("== test: GET /story/:id (OG share page) ==");
+  {
+    const r = await api("/story/1");
+    check("200", r.status === 200);
+    check("html content type", (r.headers.get("content-type") ?? "").includes("text/html"));
+    check("title from keyPhrase", r.text.includes("<title>Bashar al-Assad sentenced to death — The Anti-Spin Read</title>"));
+    check("og:title", r.text.includes('property="og:title" content="Bashar al-Assad sentenced to death"'));
+    check("og:description from neutralSummary", r.text.includes('property="og:description" content="A Syrian court sentenced Bashar al-Assad to death in absentia over killings and torture committed during his rule."'));
+    check("og:image from safe article image", r.text.includes('property="og:image" content="https://picsum.photos/seed/bbc/640/400"'));
+    check("twitter large image card", r.text.includes('name="twitter:card" content="summary_large_image"'));
+    check("canonical url", r.text.includes('<link rel="canonical" href="http://localhost/story/1">'));
+    check("json-ld NewsArticle", r.text.includes('"@type":"NewsArticle"'));
+    check("coverage list with links", r.text.includes("Ousted Syrian dictator"));
+    check("security headers on html too", !!r.headers.get("content-security-policy"));
+    check("long cache", r.headers.get("cache-control") === "public, max-age=3600");
+
+    const miss = await api("/story/999999");
+    check("purged -> 404 noindex page", miss.status === 404 && miss.text.includes("no longer available"));
+    const bad = await api("/story/abc");
+    check("non-numeric -> 404 page", bad.status === 404);
+  }
+
+  console.log("== test: GET /story/:id escaping (feed-injected markup) ==");
+  {
+    const escDb = new MemoryDb();
+    const escApp = createApp(escDb);
+    const escEnv = { GEMINI_API_KEY: "", CRON_SECRET: SECRET, DB: {} } as Env;
+    await escDb.insertArticles([
+      {
+        dedupKey: "esc|BBC|1",
+        source: "BBC",
+        title: "<b>Bold</b> & \"quote\"",
+        url: "https://bbc.example/x",
+        lede: "lede & more",
+        publishedAt: new Date(),
+        imageUrl: "",
+      },
+    ]);
+    const id = await escDb.createCluster(
+      `<script>alert(1)</script> & "quoted"`,
+      ["esc|BBC|1"],
+      new Date(),
+      "esc-sig"
+    );
+    const res = await escApp.request(`/story/${id}`, {}, escEnv);
+    const text = await res.text();
+    check("200", res.status === 200);
+    check("script tag cannot break out (html)", !text.includes("<script>alert(1)</script>") && text.includes("&lt;script&gt;"));
+    check("script tag cannot break out (json-ld)", !text.includes('"headline":"<script>alert(1)</script>'));
+    check("ampersand escaped", text.includes("&amp;"));
+    check("quote escaped", text.includes("&quot;"));
+  }
+
+  console.log("== test: robots.txt + sitemap.xml ==");
+  {
+    const robots = await api("/robots.txt");
+    check("200 text", robots.status === 200 && (robots.headers.get("content-type") ?? "").includes("text/plain"));
+    check("allow all, disallow api", robots.text.includes("Allow: /") && robots.text.includes("Disallow: /api/"));
+    check("sitemap absolute url", robots.text.includes("Sitemap: http://localhost/sitemap.xml"));
+
+    const sitemap = await api("/sitemap.xml");
+    check("200 xml", sitemap.status === 200 && (sitemap.headers.get("content-type") ?? "").includes("application/xml"));
+    check("urlset root", sitemap.text.includes('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'));
+    // 5 seeded + 1 "Broken cluster" added by the sanitization test above.
+    check("all 6 clusters listed", (sitemap.text.match(/<url>/g) ?? []).length === 6);
+    check("loc points at story pages", sitemap.text.includes("<loc>http://localhost/story/1</loc>"));
+    check("lastmod present", sitemap.text.includes("<lastmod>"));
+    check("long cache", sitemap.headers.get("cache-control") === "public, max-age=21600");
+    check("security headers on xml too", !!sitemap.headers.get("content-security-policy"));
+  }
+
   console.log("== test: CORS allowlist ==");
   {
     const r = await api("/api/clusters", { origin: "http://localhost:5173" });
@@ -356,11 +475,27 @@ async function main() {
     error: "Gemini HTTP 500",
   });
   const res = await runsApp.request("/api/runs", {}, runsEnv);
-  const body = (await res.json()) as { runs: any[] };
+  const body = (await res.json()) as { runs: any[]; backlog: number };
   check("200", res.status === 200);
   check("runs newest first", body.runs[0].scraped === 80 && body.runs[1].scraped === 100);
   check("no-store cache", res.headers.get("cache-control") === "no-store");
   check("error surfaced", body.runs[0].error === "Gemini HTTP 500");
+  // Unframed cluster -> the framing backlog is surfaced to the SPA footer.
+  await runsDb.insertArticles([
+    {
+      dedupKey: "seed|BBC|Unframed",
+      source: "BBC",
+      title: "Unframed story",
+      url: "https://bbc.example/unframed",
+      lede: "",
+      publishedAt: new Date(),
+      imageUrl: "",
+    },
+  ]);
+  await runsDb.createCluster("Unframed cluster", ["seed|BBC|Unframed"], new Date(), "unframed-sig");
+  const res2 = await runsApp.request("/api/runs", {}, runsEnv);
+  const body2 = (await res2.json()) as { backlog: number };
+  check("backlog counts unframed clusters", body2.backlog === 1);
   const bad = await runsApp.request("/api/runs?limit=99", {}, runsEnv);
   check("invalid limit -> 400", bad.status === 400);
 }

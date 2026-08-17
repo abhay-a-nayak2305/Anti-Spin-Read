@@ -12,6 +12,8 @@ export function StoryCard({
   onOpen,
   eager = false,
   isNew = false,
+  saved = false,
+  onToggleSave,
 }: {
   cluster: Cluster;
   onOpen: (c: Cluster) => void;
@@ -19,6 +21,10 @@ export function StoryCard({
   eager?: boolean;
   /** Story appeared since the user's last acknowledged visit. */
   isNew?: boolean;
+  /** Story is in the reader's saved bookmarks. */
+  saved?: boolean;
+  /** Wired by App — omitted in tests and standalone usage → no heart button. */
+  onToggleSave?: (c: Cluster) => void;
 }) {
   const sourceCount = cluster.articles.length;
   const hero = cluster.articles[0];
@@ -77,6 +83,20 @@ export function StoryCard({
           <span className="text-[10px] uppercase tracking-widest text-ink/50">
             {timeAgo(cluster.seenAt)}
           </span>
+          {onToggleSave && (
+            <button
+              type="button"
+              onClick={() => onToggleSave(cluster)}
+              aria-label={saved ? "Unsave story" : "Save story"}
+              aria-pressed={saved}
+              title={saved ? "Unsave story" : "Save story"}
+              className={`border-none bg-transparent p-0 text-[11px] leading-none transition-colors hover:text-alarm ${
+                saved ? "text-alarm" : "text-ink/40"
+              }`}
+            >
+              ♥
+            </button>
+          )}
         </div>
       </div>
     </article>

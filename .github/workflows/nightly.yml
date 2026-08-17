@@ -6,9 +6,11 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch: {}
 
-# Nightly re-run of the offline eval gates plus a LIVE feed health check.
-# No secrets or Gemini keys are used here — the framing eval stays on its
-# offline corpus so the scheduled workflow can run without any secrets.
+# Nightly re-run of the offline eval gates plus LIVE checks: feed health
+# (no secrets) and pipeline/D1 health (uses the same Cloudflare credentials
+# as deploy.yml — scheduled runs on the main branch have access to them).
+# No Gemini keys are used anywhere here; the framing eval stays on its
+# offline corpus.
 jobs:
   cluster-eval:
     name: Clustering eval gate (bilingual corpus)
@@ -57,3 +59,22 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npx tsx scripts/check-feeds.ts
+
+  pipeline-health:
+    name: Live pipeline health check (D1)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx tsx scripts/check-pipeline-health.ts
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

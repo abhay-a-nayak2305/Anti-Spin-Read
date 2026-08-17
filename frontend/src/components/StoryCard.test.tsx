@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { StoryCard } from "./StoryCard";
 import type { Cluster } from "../types";
@@ -112,5 +112,53 @@ describe("StoryCard", () => {
       />
     );
     expect(screen.queryByText("Framing…")).not.toBeInTheDocument();
+  });
+
+  it("shows a save heart reflecting the saved prop", () => {
+    render(
+      <StoryCard
+        cluster={cluster}
+        onOpen={vi.fn()}
+        saved={false}
+        onToggleSave={vi.fn()}
+      />
+    );
+    const heart = screen.getByRole("button", { name: "Save story" });
+    expect(heart).toHaveAttribute("aria-pressed", "false");
+    expect(heart).toHaveAttribute("title", "Save story");
+
+    render(
+      <StoryCard
+        cluster={cluster}
+        onOpen={vi.fn()}
+        saved
+        onToggleSave={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("button", { name: "Unsave story" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  });
+
+  it("toggles via onToggleSave with the cluster when the heart is clicked", () => {
+    const onToggleSave = vi.fn();
+    render(
+      <StoryCard
+        cluster={cluster}
+        onOpen={vi.fn()}
+        saved={false}
+        onToggleSave={onToggleSave}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save story" }));
+    expect(onToggleSave).toHaveBeenCalledTimes(1);
+    expect(onToggleSave).toHaveBeenCalledWith(cluster);
+  });
+
+  it("omits the heart entirely when no save handler is wired", () => {
+    render(<StoryCard cluster={cluster} onOpen={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /save story/i })).not.toBeInTheDocument();
   });
 });
