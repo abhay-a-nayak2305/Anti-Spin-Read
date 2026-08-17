@@ -29,9 +29,10 @@ frontend/                React + Vite + Tailwind SPA (built into Worker assets)
   src/                   App, components, hooks (useClusters polling/pagination,
                          useBookmarks localStorage saves), types
   tests/                 Playwright UI smoke test (ui_test.py)
-.github/workflows/       ci.yml (tests + eval gates + audit + live e2e),
+.github/workflows/       ci.yml (tests + eval gates + audit + live e2e + UI smoke),
                          deploy.yml, nightly.yml (03:17 UTC evals + live feed +
-                         live pipeline health checks)
+                         live pipeline health checks), uptime.yml (30-min
+                         /api/health heartbeat)
 .github/dependabot.yml   weekly npm / monthly actions updates
 docs/                    architecture.md, api.md, adr/0001–0003
 CHANGELOG.md             keep-a-changelog format
@@ -71,12 +72,17 @@ invocation — two servers, seeded API on :4321, Vite on :5173).
 
 CI (`.github/workflows/ci.yml`) runs: backend typecheck + `npm test`;
 frontend lint + test + build; framing-eval and cluster-eval gates; `npm audit
---audit-level=high` on both packages; and a live pipeline e2e on `main` only.
+--audit-level=high` on both packages; a live pipeline e2e on `main` only; and
+the Playwright UI smoke suite (`ui_test.py` — seeded API on :4321 + Vite on
+:5173, chromium via setup-python, no Playwright config file needed).
 
 `nightly.yml` (03:17 UTC + manual dispatch) re-runs the eval gates, the live
 feed check (`check-feeds.ts`), and the live pipeline health check
 (`check-pipeline-health.ts` — reads D1 via `wrangler d1 execute`; needs
 `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` GitHub secrets).
+
+`uptime.yml` (every 30 min) pings the production `/api/health` and SPA root;
+a non-2xx fails the job and GitHub emails the default branch. No secrets.
 
 ## Eval gates (do not weaken)
 

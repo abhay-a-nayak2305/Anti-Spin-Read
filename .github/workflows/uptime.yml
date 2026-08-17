@@ -1,0 +1,23 @@
+# Cheap uptime heartbeat: pings the production Worker's /api/health and the
+# SPA root every 30 minutes. A non-2xx fails the job — GitHub emails the
+# default branch on scheduled-workflow failure, so a dead route or a platform
+# outage raises an alarm without any external uptime service.
+#
+# The pipeline's *health* (runs, skips, framing backlog) is a separate,
+# deeper concern — that's nightly.yml's `pipeline-health` job.
+name: Uptime heartbeat
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Production health endpoint
+    runs-on: ubuntu-latest
+    steps:
+      - name: GET /api/health
+        run: curl -fsS --max-time 20 https://anti-spin-read.smartgadgetfinds23.workers.dev/api/health
+      - name: GET / (SPA shell)
+        run: curl -fsS --max-time 20 -o /dev/null https://anti-spin-read.smartgadgetfinds23.workers.dev/
