@@ -20,6 +20,9 @@ export class MemoryDb implements Db {
   private nextId = 1;
   // Public for tests to assert lock semantics
   lock: { token: string; acquiredAt: number } | null = null;
+  // Enrichment attempt timestamps (dedupKey -> ms) — parity with the
+  // articles.last_enrich_attempt_ms column that gates the catch-up queue.
+  enrichAttempts = new Map<string, number>();
 
   async insertArticles(articles: RawArticle[]): Promise<RawArticle[]> {
     const inserted: RawArticle[] = [];
@@ -32,12 +35,24 @@ export class MemoryDb implements Db {
     return inserted;
   }
 
-  async articlesInClustersMissingImages(limit: number): Promise<RawArticle[]> {
+  async articlesInClustersMissingImages(
+    limit: number,
+    notAttemptedSinceMs: number
+  ): Promise<RawArticle[]> {
     const referenced = new Set(this.clusters.flatMap((c) => c.articleKeys));
     return [...this.articles.values()]
-      .filter((a) => referenced.has(a.dedupKey) && !a.imageUrl)
+      .filter(
+        (a) =>
+          referenced.has(a.dedupKey) &&
+          !a.imageUrl &&
+          (this.enrichAttempts.get(a.dedupKey) ?? 0) < notAttemptedSinceMs
+      )
       .sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime())
       .slice(0, limit);
+  }
+
+  async markEnrichAttempt(dedupKey: string, atMs: number): Promise<void> {
+    this.enrichAttempts.set(dedupKey, atMs);
   }
 
   async recentArticles(since: Date): Promise<RawArticle[]> {

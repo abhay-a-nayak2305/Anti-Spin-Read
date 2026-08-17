@@ -24,7 +24,22 @@ export interface Db {
    * enrichment existed) and articles whose publisher blocked the first
    * attempt. Bounded per run to the subrequest budget.
    */
-  articlesInClustersMissingImages(limit: number): Promise<RawArticle[]>;
+  /**
+   * Cluster-referenced articles that still lack an og:image — the
+   * enrichment catch-up queue. New clusters are enriched in the run that
+   * creates them; this covers older clusters (e.g. formed before
+   * enrichment existed) and articles whose publisher blocked the first
+   * attempt. Bounded per run to the subrequest budget.
+   *
+   * `notAttemptedSinceMs` gates the queue: articles whose last enrichment
+   * attempt is newer than that timestamp are skipped, so permanently
+   * failing publishers (403s, unresolvable redirect chains) are not
+   * retried on every run at the expense of resolvable articles.
+   */
+  articlesInClustersMissingImages(
+    limit: number,
+    notAttemptedSinceMs: number
+  ): Promise<RawArticle[]>;
   /** Has any framed cluster already used one of these article keys? */
   clusterExistsWithFraming(keys: string[]): Promise<boolean>;
   /**
@@ -46,6 +61,9 @@ export interface Db {
   ): Promise<void>;
   /** Persist an og:image URL discovered during enrichment */
   setArticleImage(dedupKey: string, imageUrl: string): Promise<void>;
+  /** Record that an enrichment attempt ran for this article (success or
+   *  failure) — powers the retry gate in articlesInClustersMissingImages. */
+  markEnrichAttempt(dedupKey: string, atMs: number): Promise<void>;
   latestClusters(limit: number, offset?: number): Promise<ClusterRecord[]>;
   /**
    * Clusters whose key phrase, or any referenced article's title/lede,
@@ -160,16 +178,20 @@ export class D1Db implements Db {
     return inserted;
   }
 
-  async articlesInClustersMissingImages(limit: number): Promise<RawArticle[]> {
+  async articlesInClustersMissingImages(
+    limit: number,
+    notAttemptedSinceMs: number
+  ): Promise<RawArticle[]> {
     const { results } = await this.env
       .prepare(
         `SELECT DISTINCT a.${ARTICLE_COLS.replaceAll(", ", ", a.")} FROM articles a
          JOIN cluster_articles ca ON ca.dedup_key = a.dedup_key
          WHERE a.image_url = ''
+           AND (a.last_enrich_attempt_ms = 0 OR a.last_enrich_attempt_ms < ?)
          ORDER BY a.published_at DESC
          LIMIT ?`
       )
-      .bind(limit)
+      .bind(notAttemptedSinceMs, limit)
       .all();
     return results.map(toRaw);
   }
@@ -277,6 +299,15 @@ export class D1Db implements Db {
     await this.env
       .prepare("UPDATE articles SET image_url = ? WHERE dedup_key = ?")
       .bind(imageUrl, dedupKey)
+      .run();
+  }
+
+  async markEnrichAttempt(dedupKey: string, atMs: number): Promise<void> {
+    await this.env
+      .prepare(
+        "UPDATE articles SET last_enrich_attempt_ms = ? WHERE dedup_key = ?"
+      )
+      .bind(atMs, dedupKey)
       .run();
   }
 

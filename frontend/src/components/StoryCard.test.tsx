@@ -39,7 +39,7 @@ describe("StoryCard", () => {
     );
   });
 
-  it("always renders a hero image via the fallback chain (no NO IMAGE box)", () => {
+  it("always renders a hero via the fallback chain (no NO IMAGE box)", () => {
     const { container } = render(
       <StoryCard
         cluster={{
@@ -58,10 +58,12 @@ describe("StoryCard", () => {
         onOpen={vi.fn()}
       />
     );
-    // The favicon is the first fallback candidate: /favicon.ico on the site host.
+    // No og:image -> the letter monogram placeholder, not a stretched
+    // favicon (a 16×16 site logo full-bleed reads as a wrong image).
     const img = container.querySelector("img");
-    expect(img).not.toBeNull();
-    expect(img!.getAttribute("src")).toContain("bbc.co.uk/favicon.ico");
+    expect(img).toBeNull();
+    expect(container.querySelector(".letter-badge, svg")).not.toBeNull();
+    expect(container.querySelector(".no-img")).not.toBeNull();
     expect(screen.queryByText("NO IMAGE")).not.toBeInTheDocument();
   });
 

@@ -1,14 +1,17 @@
 import { useState } from "react";
-import { faviconUrl } from "../types";
 import { LetterBadge } from "./LetterBadge";
 
 /**
  * Hero image with a privacy-preserving fallback chain:
- * og:image → site favicon (`<host>/favicon.ico`, no Google lookup) → inline
- * SVG letter monogram. The final badge costs zero network requests, so the
- * hero box is always filled. When the chain starts in fallback (no og:image
- * at all), the diagonal-stripe pattern shows through at 30% so the box still
- * reads as a designed placeholder rather than a broken image.
+ * og:image → inline SVG letter monogram.
+ *
+ * The site favicon is deliberately NOT part of the hero chain — a 16×16
+ * logo stretched across a 16:9 box reads as a broken/inaccurate image
+ * (the live site showed favicon heroes on ~1/3 of cards). The monogram is
+ * a designed "no image" placeholder: it costs zero network requests, and
+ * the diagonal-stripe pattern shows through at 30% so the box reads as
+ * intentional. (Article thumbnails in the story modal keep the favicon —
+ * at 40×40 a site mark is legible and useful.)
  *
  * The wrapper owns the 16:9 aspect ratio and the img carries explicit
  * intrinsic dimensions (1280×720), so the browser reserves layout space
@@ -24,29 +27,26 @@ export function HeroImage({
   /** Above-the-fold heroes (first card) may load eagerly; everything else lazy. */
   eager?: boolean;
 }) {
-  const [srcIndex, setSrcIndex] = useState(0);
-  const candidates = [src, faviconUrl(site)].filter(Boolean);
-  const current = candidates[srcIndex];
-  const exhausted = srcIndex >= candidates.length;
-  const isFallback = !src || srcIndex > 0;
+  const [broken, setBroken] = useState(false);
+  const exhausted = !src || broken;
 
   return (
     <div className="relative aspect-video overflow-hidden bg-ink">
-      {isFallback && (
+      {(!src || broken) && (
         <div className="absolute inset-0 no-img opacity-30" aria-hidden />
       )}
       {exhausted ? (
         <LetterBadge site={site} className="h-full w-full" />
       ) : (
         <img
-          src={current}
+          src={src}
           alt=""
           width={1280}
           height={720}
           loading={eager ? "eager" : "lazy"}
           decoding={eager ? "sync" : "async"}
           referrerPolicy="no-referrer"
-          onError={() => setSrcIndex((i) => i + 1)}
+          onError={() => setBroken(true)}
           className="h-full w-full object-cover grayscale contrast-125"
         />
       )}

@@ -68,7 +68,8 @@ that server directly (as the seeded UI test does).
 ## How the UI is organized
 
 - `src/components/` — `StoryCard` (grid card), `StoryModal` (full details with
-  focus trap), `HeroImage` (og:image → favicon fallback), `badges` (shared
+  focus trap), `HeroImage` (og:image → letter-monogram fallback; no stretched
+  favicon), `badges` (shared
   source-count / status / tone chips), `ErrorBoundary` (brutalist fallback).
 - `src/hooks/` — `useClusters` polls `/api/clusters` with request
   supersession, abort-on-unmount and exponential backoff (1s → 60s), and

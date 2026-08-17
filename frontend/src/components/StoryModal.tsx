@@ -6,9 +6,10 @@ import { LetterBadge } from "./LetterBadge";
 import { SourceCountBadge, ToneChip } from "./badges";
 
 /**
- * Article thumbnail with the same privacy-preserving chain as the hero:
- * og:image → site favicon → inline SVG letter monogram. The img declares
- * its intrinsic 40×40 size so the row reserves space before load.
+ * Article thumbnail: og:image → site favicon → inline SVG letter monogram.
+ * Unlike the hero, the favicon IS a candidate here — at 40×40 a site mark
+ * is legible and useful, not a stretched artifact. The img declares its
+ * intrinsic 40×40 size so the row reserves space before load.
  */
 function ArticleThumb({
   imageUrl,

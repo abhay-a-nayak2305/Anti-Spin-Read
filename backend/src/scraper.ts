@@ -52,8 +52,11 @@ const ENTITIES: Record<string, string> = {
   "&#8212;": "—",
 };
 
-/** Decode XML/HTML entities (named + numeric) in a string. */
-function decodeEntities(s: string): string {
+/** Decode XML/HTML entities (named + numeric) in a string. Shared with the
+ *  og:image enrichment path (images.ts) — publishers encode `&` as `&amp;`
+ *  inside meta content attributes, and a raw `&amp;` in a stored URL corrupts
+ *  its query parameters. */
+export function decodeEntities(s: string): string {
   let out = s
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) =>
       String.fromCodePoint(parseInt(hex, 16))

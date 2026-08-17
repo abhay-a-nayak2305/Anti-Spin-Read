@@ -146,6 +146,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Story images were missing/wrong for ~77% of articles.** Root causes,
+  all fixed: (1) `fetchOgImage` used `redirect: "manual"` and treated any
+  3xx as "no image", so redirecting publishers (The Independent) and
+  Google-News RSS links (NPR, USA Today — `news.google.com/rss/articles/…`)
+  could never be enriched — the fetcher now follows up to 2 redirect hops,
+  re-checking every hop against the SSRF guard before fetching it; (2)
+  publishers that 403 the Worker (Sky News, The Hill) were retried on
+  *every* run forever, starving resolvable articles — every attempt now
+  stamps `articles.last_enrich_attempt_ms` (migration 0006) and the
+  catch-up queue skips articles attempted within the last 30 minutes; (3)
+  `&amp;`-encoded ampersands in og:image URLs (CNBC, Al Jazeera) were
+  stored raw, corrupting query parameters — URLs are entity-decoded now;
+  (4) **hero images no longer fall back to a stretched 16×16 site favicon**
+  (which read as a wrong image on ~1/3 of cards) — a card without an
+  og:image shows the striped letter-monogram placeholder instead. Modal
+  article thumbnails keep the favicon at 40×40, where a site mark is
+  legible.
 - **Stories stuck invisible — clustering only saw same-run articles.** Each
   15-minute run clustered just its ~10–15 new articles, but direct RSS feeds
   only surface each outlet's latest items, so the second outlet covering a

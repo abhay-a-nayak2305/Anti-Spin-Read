@@ -1,9 +1,19 @@
 import type { Db } from "./db.js";
+import { decodeEntities } from "./scraper.js";
 import type { RawArticle } from "./types.js";
 
 const FETCH_TIMEOUT_MS = 6000;
 const CONCURRENCY = 5;
 const MAX_BODY_CHARS = 512 * 1024;
+/**
+ * Redirect hops followed beyond the initial request. Each hop counts as a
+ * subrequest against the 50-per-invocation budget, so the chain is capped
+ * hard: 3 subrequests per article worst case. Google-News RSS links
+ * (news.google.com/rss/articles/… → /url/… → publisher) and redirecting
+ * publishers (The Independent, …) need exactly 2 hops; anything longer is
+ * treated as "no image" and the row retries later.
+ */
+const MAX_REDIRECTS = 2;
 
 const PRIVATE_HOST_RE =
   /^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.0\.0\.0|\[?::1\]?|172\.(1[6-9]|2\d|3[01])\.)/i;
@@ -195,7 +205,10 @@ export function isSafeHttpUrl(url: string): boolean {
 
 /**
  * Extract the og:image URL from raw HTML. Tolerates property/name in either
- * order relative to content, single/double quotes, and protocol-relative URLs.
+ * order relative to content, single/double quotes, protocol-relative URLs,
+ * and HTML-encoded ampersands (`&amp;` → `&` — publishers routinely encode
+ * the `&` in `?w=900&amp;h=500` query strings; a raw `&amp;` in a stored
+ * URL corrupts the parameters).
  */
 export function extractOgImage(html: string): string {
   const re =
@@ -204,7 +217,7 @@ export function extractOgImage(html: string): string {
   const raw = m?.[1] ?? m?.[2] ?? "";
   if (!raw) return "";
 
-  let url = raw.trim();
+  let url = decodeEntities(raw.trim());
   // Protocol-relative: //img.example/x.png -> https://img.example/x.png
   if (url.startsWith("//")) url = `https:${url}`;
   return isSafeHttpUrl(url) ? url : "";
@@ -233,11 +246,15 @@ async function readCappedText(body: ReadableStream | null): Promise<string> {
  * Workers runtime uses HTMLRewriter (streaming, cheap); Node tests fall
  * back to the regex extractor. Never follows non-http schemes, reads at
  * most MAX_BODY_CHARS, and requires a text/html content type.
- * Redirects are NOT followed (`redirect: "manual"`): every hop counts as a
- * subrequest against the Worker's 50-per-invocation budget, and article
- * URLs commonly chain 2–3 redirects. A 3xx is treated as "no image" (the
- * row retries next run). The SSRF re-check on `res.url` stays for defense
- * in depth.
+ *
+ * Redirects ARE followed, but at most MAX_REDIRECTS hops (3 subrequests
+ * total per article): Google-News RSS links and several publishers (e.g.
+ * The Independent) 3xx their article URLs, and `redirect: "manual"` used
+ * to make those articles permanently unenrichable. Every hop is re-checked
+ * through `isSafeHttpUrl` BEFORE the next fetch — a chain that bounces
+ * toward a private/reserved address is dropped, never fetched. A chain
+ * longer than MAX_REDIRECTS is treated as "no image" (retried later, but
+ * throttled by the last_enrich_attempt_ms gate).
  */
 export async function fetchOgImage(
   url: string,
@@ -248,49 +265,61 @@ export async function fetchOgImage(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
-      redirect: "manual",
-      signal: controller.signal,
-      headers: {
-        // A browser-like UA: several outlets (The Hill, Sky News, DW …)
-        // return 403 to non-browser UAs; og:image is public page metadata,
-        // the same bytes a visitor's browser would read.
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-      },
-    });
-    if (!res.ok) return "";
-    const contentType = res.headers.get("content-type") ?? "";
-    if (!contentType.toLowerCase().startsWith("text/html")) return "";
-    if (!isSafeHttpUrl(res.url)) return ""; // redirect chain left the public web
+    let current = url;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      if (!isSafeHttpUrl(current)) return ""; // hop destination re-checked
+      const res = await fetch(current, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: {
+          // A browser-like UA: several outlets (The Hill, Sky News, DW …)
+          // return 403 to non-browser UAs; og:image is public page metadata,
+          // the same bytes a visitor's browser would read.
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        },
+      });
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get("location");
+        if (!location || hop === MAX_REDIRECTS) return "";
+        // Relative Location headers resolve against the current URL.
+        current = new URL(location, current).toString();
+        continue;
+      }
+      if (!res.ok) return "";
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.toLowerCase().startsWith("text/html")) return "";
+      if (!isSafeHttpUrl(res.url)) return ""; // final URL left the public web
 
-    if (typeof HTMLRewriter !== "undefined") {
-      let found = "";
-      const transformed = new HTMLRewriter()
-        .on("meta", {
-          element(el) {
-            if (found) return;
-            const key = el.getAttribute("property") ?? el.getAttribute("name");
-            if (key === "og:image") {
-              const content = el.getAttribute("content") ?? "";
-              if (content) found = content;
-            }
-          },
-        })
-        .transform(res);
-      await readCappedText(transformed.body); // drain stream so the request completes
-      const og = found.trim();
-      if (!og) return "";
-      // Protocol-relative: //img.example/x.png -> https://img.example/x.png
-      const candidate = og.startsWith("//") ? `https:${og}` : og;
-      return isSafeHttpUrl(candidate) ? candidate : "";
+      if (typeof HTMLRewriter !== "undefined") {
+        let found = "";
+        const transformed = new HTMLRewriter()
+          .on("meta", {
+            element(el) {
+              if (found) return;
+              const key = el.getAttribute("property") ?? el.getAttribute("name");
+              if (key === "og:image") {
+                const content = el.getAttribute("content") ?? "";
+                if (content) found = content;
+              }
+            },
+          })
+          .transform(res);
+        await readCappedText(transformed.body); // drain stream so the request completes
+        const og = decodeEntities(found.trim());
+        if (!og) return "";
+        // Protocol-relative: //img.example/x.png -> https://img.example/x.png
+        const candidate = og.startsWith("//") ? `https:${og}` : og;
+        return isSafeHttpUrl(candidate) ? candidate : "";
+      }
+
+      const html = await readCappedText(res.body);
+      return extractOgImage(html);
     }
-
-    const html = await readCappedText(res.body);
-    return extractOgImage(html);
+    return "";
   } catch {
     // Timeout (abort), network error, or parse failure — treat as "no image";
-    // enrichment retries on the next pipeline run.
+    // enrichment retries on a later pipeline run (throttled by the retry gate).
     return "";
   } finally {
     clearTimeout(timer);
@@ -300,8 +329,10 @@ export async function fetchOgImage(
 /**
  * Fetch og:image for articles that don't have one yet and persist it.
  * Runs only on articles in new clusters (keeps subrequests well under the
- * free-tier limit of 50 per invocation). Failures are logged and skipped —
- * enrichment retries on the next pipeline run.
+ * free-tier limit of 50 per invocation). Every attempt — success or
+ * failure — is recorded via `markEnrichAttempt`, so permanently failing
+ * publishers are throttled instead of retried on every run. Failures are
+ * logged and skipped; enrichment retries on a later pipeline run.
  */
 export async function enrichArticleImages(
   db: Db,
@@ -318,6 +349,7 @@ export async function enrichArticleImages(
       const article = pending[cursor++];
       try {
         const imageUrl = await fetchOgImage(article.url);
+        await db.markEnrichAttempt(article.dedupKey, Date.now());
         if (imageUrl) {
           await db.setArticleImage(article.dedupKey, imageUrl);
           enriched++;

@@ -378,7 +378,7 @@ console.log("== test: recentUnclusteredArticles clustering pool ==");
 
 console.log("== test: articlesInClustersMissingImages catch-up queue ==");
 {
-  const { db } = makeDb();
+  const { db, d1 } = makeDb();
   const now = new Date();
   await db.insertArticles([
     art("BBC", "No image clustered", new Date(now.getTime() - 60_000)),
@@ -389,14 +389,29 @@ console.log("== test: articlesInClustersMissingImages catch-up queue ==");
   await seedCluster(db, clustered, now, "sig-img");
   await db.setArticleImage("CNN|Has image clustered", "https://img.example/x.jpg");
 
-  const queue = await db.articlesInClustersMissingImages(10);
+  const queue = await db.articlesInClustersMissingImages(10, Date.now() + 86_400_000);
   const titles = queue.map((a) => a.title);
   check("clustered article without image queued", titles.includes("No image clustered"));
   check("clustered article WITH image not queued", !titles.includes("Has image clustered"));
   check("unclustered article not queued", !titles.includes("No image unclustered"));
 
-  const capped = await db.articlesInClustersMissingImages(1);
+  const capped = await db.articlesInClustersMissingImages(1, Date.now() + 86_400_000);
   check("limit honored", capped.length === 1);
+
+  // Retry gate: a recent failed attempt takes the article out of the queue.
+  await db.markEnrichAttempt("BBC|No image clustered", Date.now());
+  const gated = await db.articlesInClustersMissingImages(10, Date.now() - 60_000);
+  check("recently-attempted article gated out", !gated.some((a) => a.title === "No image clustered"));
+  const ungated = await db.articlesInClustersMissingImages(10, Date.now() + 86_400_000);
+  check("old-enough attempt back in the queue", ungated.some((a) => a.title === "No image clustered"));
+  // Migration 0006 column exists and the update landed.
+  const attemptRow = await d1
+    .prepare("SELECT last_enrich_attempt_ms FROM articles WHERE dedup_key = 'BBC|No image clustered'")
+    .first();
+  check(
+    "last_enrich_attempt_ms column persisted",
+    Number(attemptRow?.last_enrich_attempt_ms) > 0
+  );
 }
 
 console.log("== test: meta upsert ==");

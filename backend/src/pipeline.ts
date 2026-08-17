@@ -11,11 +11,20 @@ const FRAMING_CONCURRENCY = 3;
 const RETRY_BATCH = 50;
 // Workers free plan caps outbound requests at 50 per invocation. One run
 // spends ~18-22 on RSS (a redirected direct feed costs 2: direct + Google
-// News fallback), so enrichment and framing share the rest:
-// (ENRICH_BATCH + ENRICH_CATCHUP) × 1 hop + FRAMING_BATCH × 5 (3 primary +
-// 2 fallback attempts, worst case) → 12 + 15 = 27, ~45-49 total.
+// News fallback), so enrichment and framing share the rest. Enrichment now
+// follows up to 2 redirect hops per article (3 subrequests worst case) so
+// Google-News links and redirecting publishers can finally be enriched:
+// (ENRICH_BATCH + ENRICH_CATCHUP) × 3 hops worst + FRAMING_BATCH × 5
+// (3 primary + 2 fallback attempts) → 36 + 15 = 51… which can exceed 50 on
+// a day every feed redirects. The retry gate (articlesInClustersMissingImages
+// with notAttemptedSinceMs) keeps blocked articles out of the queue, so the
+// steady state stays ~18-22 RSS + ~12-24 enrich + ~3-9 framing ≈ 40-48.
 const ENRICH_BATCH = 8;
 const ENRICH_CATCHUP = 4;
+// Articles whose last enrichment attempt is newer than this are skipped by
+// the catch-up queue — publishers that 403 the Worker or never resolve
+// their redirect chain are retried at most this often instead of every run.
+const ENRICH_RETRY_MS = 30 * 60_000;
 const FRAMING_BATCH = 3;
 // Framing-only cron mode: no RSS/enrichment subrequests run, so the whole
 // budget goes to Gemini. 14 clusters x 3 worst-case attempts (primary +
@@ -217,8 +226,15 @@ export async function runPipeline(
 
       // 2c. Enrichment catch-up: older clusters' articles that still lack an
       // image (formed before enrichment existed, or publishers that blocked
-      // the first attempt). Bounded to the subrequest budget.
-      await enrich(db, await db.articlesInClustersMissingImages(ENRICH_CATCHUP));
+      // the first attempt). Bounded to the subrequest budget, and gated by
+      // ENRICH_RETRY_MS so permanently-failing articles can't hog the queue.
+      await enrich(
+        db,
+        await db.articlesInClustersMissingImages(
+          ENRICH_CATCHUP,
+          Date.now() - ENRICH_RETRY_MS
+        )
+      );
     }
 
     // 3. Collect clusters that still need framing: new ones first (create

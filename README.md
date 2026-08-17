@@ -50,7 +50,7 @@ Google News RSS (8 outlets)
 
 **Framing prompt.** Per cluster: headline deltas, per-outlet tone tags, notable omissions, neutral summary — strict JSON out, structural validation in.
 
-**Story images.** Google News RSS carries no images, so after clustering the pipeline fetches each new-cluster article's page, extracts its `og:image`, and stores it in D1 (`articles.image_url`). Best-effort only — failures are skipped and retried next run; the UI falls back to the outlet favicon, then a striped NO-IMAGE block. Fetching only cluster articles keeps the Worker well under its 50-subrequest free-tier budget.
+**Story images.** Google News RSS carries no images, so after clustering the pipeline fetches each new-cluster article's page, extracts its `og:image`, and stores it in D1 (`articles.image_url`). Fetches follow up to 2 redirect hops (Google-News links and redirecting publishers) and re-check every hop against the SSRF guard; failed attempts are throttled by a retry gate so blocking publishers can't starve the queue. Best-effort only — the UI falls back to a striped letter-monogram placeholder, never a stretched favicon. Fetching only cluster articles keeps the Worker well under its 50-subrequest free-tier budget.
 
 **Cloudflare everything.** D1 (SQLite) replaces MongoDB — the pipeline's "memory" so stories accumulate across runs and no story is framed twice. The Worker Cron Trigger replaces the GitHub Actions scheduler. One `wrangler deploy` ships DB schema, API, and SPA together.
 

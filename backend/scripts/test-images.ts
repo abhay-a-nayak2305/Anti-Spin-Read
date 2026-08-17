@@ -38,6 +38,16 @@ console.log("== test: extractOgImage ==");
       "https://img.example/x.png"
   );
   check(
+    "html-encoded &amp; decoded in query string",
+    extractOgImage(`<meta property="og:image" content="https://img.example/i.png?w=900&amp;h=500">`) ===
+      "https://img.example/i.png?w=900&h=500"
+  );
+  check(
+    "numeric entity decoded",
+    extractOgImage(`<meta property="og:image" content="https://img.example/i.png?x=&#38;y=1">`) ===
+      "https://img.example/i.png?x=&y=1"
+  );
+  check(
     "non-http scheme rejected",
     extractOgImage(`<meta property="og:image" content="file:///etc/passwd">`) === ""
   );
@@ -198,16 +208,92 @@ console.log("== test: fetchOgImage via stubbed fetch ==");
       const got3 = await fetchOgImage("http://127.0.0.1/x", 2000);
       check("unsafe url never fetched", got3 === "" && !called);
 
-      // 3xx redirect -> skipped, and never followed (each hop is a
-      // subrequest against the 50-per-invocation budget)
+      // 3xx redirect -> followed up to MAX_REDIRECTS (2) hops, then the
+      // og:image is read from the final page. Every hop costs a subrequest
+      // against the 50-per-invocation budget, so the chain is capped hard.
       let redirectCalls = 0;
-      await stubFetch(async () => {
+      await stubFetch(async (url) => {
         redirectCalls++;
+        if (url === "https://a.example/redirect") {
+          return {
+            ok: false,
+            status: 302,
+            url: "https://a.example/redirect",
+            headers: new Headers({ location: "https://a.example/real-story" }),
+            body: new ReadableStream({
+              start(c) {
+                c.enqueue(new TextEncoder().encode(""));
+                c.close();
+              },
+            }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          url: "https://a.example/real-story",
+          headers: new Headers({ "content-type": "text/html" }),
+          body: new ReadableStream({
+            start(c) {
+              c.enqueue(
+                new TextEncoder().encode(
+                  '<meta property="og:image" content="https://a.example/img.jpg">'
+                )
+              );
+              c.close();
+            },
+          }),
+        };
+      });
+      const got4 = await fetchOgImage("https://a.example/redirect", 2000);
+      check("3xx redirect followed to final page", got4 === "https://a.example/img.jpg");
+      check("redirect followed (2 subrequests)", redirectCalls === 2);
+
+      // Relative Location header resolves against the current URL.
+      await stubFetch(async (url) => {
+        if (url === "https://a.example/story/x") {
+          return {
+            ok: false,
+            status: 301,
+            url: "https://a.example/story/x",
+            headers: new Headers({ location: "../real/y" }),
+            body: new ReadableStream({
+              start(c) {
+                c.enqueue(new TextEncoder().encode(""));
+                c.close();
+              },
+            }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          url: "https://a.example/real/y",
+          headers: new Headers({ "content-type": "text/html" }),
+          body: new ReadableStream({
+            start(c) {
+              c.enqueue(
+                new TextEncoder().encode(
+                  '<meta property="og:image" content="https://a.example/i2.jpg">'
+                )
+              );
+              c.close();
+            },
+          }),
+        };
+      });
+      const gotRel = await fetchOgImage("https://a.example/story/x", 2000);
+      check("relative Location resolved", gotRel === "https://a.example/i2.jpg");
+
+      // Redirect chain capped: 3 hops (initial + 2) -> no image, no 4th fetch.
+      let chainCalls = 0;
+      await stubFetch(async () => {
+        chainCalls++;
         return {
           ok: false,
           status: 302,
-          url: "https://a.example/redirect",
-          headers: new Headers({ location: "https://a.example/real-story" }),
+          url: "https://a.example/c",
+          headers: new Headers({ location: "https://a.example/next" }),
           body: new ReadableStream({
             start(c) {
               c.enqueue(new TextEncoder().encode(""));
@@ -216,9 +302,31 @@ console.log("== test: fetchOgImage via stubbed fetch ==");
           }),
         };
       });
-      const got4 = await fetchOgImage("https://a.example/redirect", 2000);
-      check("3xx redirect skipped", got4 === "");
-      check("redirect not followed (1 subrequest only)", redirectCalls === 1);
+      const gotChain = await fetchOgImage("https://a.example/c", 2000);
+      check("redirect chain capped at 2 hops", gotChain === "" && chainCalls === 3);
+
+      // Redirect toward a private/reserved host -> the hop is NOT fetched.
+      let unsafeCalls = 0;
+      await stubFetch(async (url) => {
+        if (url === "https://a.example/open-redirect") {
+          return {
+            ok: false,
+            status: 302,
+            url: "https://a.example/open-redirect",
+            headers: new Headers({ location: "http://169.254.169.254/latest/meta-data" }),
+            body: new ReadableStream({
+              start(c) {
+                c.enqueue(new TextEncoder().encode(""));
+                c.close();
+              },
+            }),
+          };
+        }
+        unsafeCalls++;
+        return { ok: true, status: 200, url, headers: new Headers() };
+      });
+      const gotUnsafe = await fetchOgImage("https://a.example/open-redirect", 2000);
+      check("redirect to private host NOT fetched (SSRF per hop)", gotUnsafe === "" && unsafeCalls === 0);
 
       // timeout abort: fetch that never resolves but honors the signal
       await stubFetch((_url, init) =>

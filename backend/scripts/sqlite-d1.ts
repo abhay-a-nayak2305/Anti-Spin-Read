@@ -27,6 +27,7 @@ const MIGRATION_FILES = [
   "0003_cluster_sig_lock.sql",
   "0004_meta.sql",
   "0005_pipeline_runs.sql",
+  "0006_enrich_attempts.sql",
 ];
 
 export class SqliteD1 {

@@ -100,14 +100,23 @@ One full run: `scrape → dedup/insert → cluster → enrich → frame → main
      or `<media:content>`/`<enclosure url>` from direct feeds (The Hill, Sky
      News, …). Feed-supplied URLs are untrusted input and pass
      `isSafeHttpUrl` before they're stored.
-   - **og:image** (`images.ts`): the page is fetched (6s timeout, HTML-only,
-     `HTMLRewriter` in Workers / regex fallback in Node) and `og:image`
-     extracted — never following non-http(s) schemes, always passing
-     `isSafeHttpUrl`. Sent with a browser-like UA: several outlets 403
-     non-browser UAs. Best-effort: failures are skipped and retried next
-     run (per-run `ENRICH_BATCH=8` for fresh clusters plus a 4-article
-     catch-up for older image-less cluster articles, all inside the
-     free-tier subrequest budget).
+- **og:image** (`images.ts`): the page is fetched (6s timeout, HTML-only,
+      `HTMLRewriter` in Workers / regex fallback in Node) and `og:image`
+      extracted — never following non-http(s) schemes, always passing
+      `isSafeHttpUrl` **on every redirect hop** (each hop is re-checked
+      BEFORE the next fetch). Redirects ARE followed up to 2 hops (3
+      subrequests per article worst case): Google-News RSS links and
+      publishers like The Independent 3xx their article URLs, which used
+      to make them permanently unenrichable. `&amp;`-style entities in the
+      og:image URL are decoded (a raw `&amp;` corrupts query parameters).
+      Sent with a browser-like UA: several outlets 403 non-browser UAs.
+      Best-effort: failures are skipped and retried later (per-run
+      `ENRICH_BATCH=8` for fresh clusters plus a 4-article catch-up for
+      older image-less cluster articles, all inside the free-tier
+      subrequest budget). Every attempt stamps `articles.last_enrich_attempt_ms`
+      (migration 0006); the catch-up queue skips articles attempted within
+      the last 30 min (`ENRICH_RETRY_MS`), so publishers that 403 the
+      Worker can't hog the queue at the expense of resolvable articles.
 5. **Frame.** Up to 3 concurrent Gemini calls per cluster with `responseSchema`
    constrained JSON output (`temperature 0.4`, `maxOutputTokens 1200`). The
    primary model gets 3 attempts with backoff (500/1500 ms); transient failures
@@ -212,7 +221,7 @@ allowlist (defaults to local dev origins).
 
 | Table | Purpose | Key migration |
 |---|---|---|
-| `articles` | deduped feed articles (`dedup_key` PK, epoch-ms timestamps) | 0001, 0002 (`image_url`) |
+| `articles` | deduped feed articles (`dedup_key` PK, epoch-ms timestamps) | 0001, 0002 (`image_url`), 0006 (`last_enrich_attempt_ms`) |
 | `clusters` | one story ≥2 outlets; `sig` unique for idempotency; `framing` JSON; `framing_error` | 0001, 0003 |
 | `cluster_articles` | cluster↔article join (FK cascade on cluster delete) | 0001 |
 | `pipeline_lock` | single-row run lock with 15-min lease | 0003 |

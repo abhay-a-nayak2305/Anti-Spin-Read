@@ -36,8 +36,9 @@ export function StoryCard({
       style={{ "--cat": meta.selection } as React.CSSProperties}
     >
       {/* clickable image — the hero always renders: og:image when present,
-          otherwise the favicon / letter-monogram fallback chain, so every
-          story card shows an image even when enrichment found nothing */}
+          otherwise the letter-monogram placeholder, so every story card
+          shows an image even when enrichment found nothing (no stretched
+          favicon — a site logo full-bleed reads as a wrong image) */}
       <button
         type="button"
         onClick={() => onOpen(cluster)}
