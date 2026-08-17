@@ -114,7 +114,7 @@ describe("StoryCard", () => {
     expect(screen.queryByText("Framing…")).not.toBeInTheDocument();
   });
 
-  it("shows a save heart reflecting the saved prop", () => {
+  it("shows a labeled Save button reflecting the saved prop", () => {
     render(
       <StoryCard
         cluster={cluster}
@@ -123,9 +123,10 @@ describe("StoryCard", () => {
         onToggleSave={vi.fn()}
       />
     );
-    const heart = screen.getByRole("button", { name: "Save story" });
-    expect(heart).toHaveAttribute("aria-pressed", "false");
-    expect(heart).toHaveAttribute("title", "Save story");
+    const save = screen.getByRole("button", { name: "Save story" });
+    expect(save).toHaveAttribute("aria-pressed", "false");
+    expect(save).toHaveAttribute("title", "Save story");
+    expect(save.textContent).toContain("Save");
 
     render(
       <StoryCard
@@ -135,13 +136,12 @@ describe("StoryCard", () => {
         onToggleSave={vi.fn()}
       />
     );
-    expect(screen.getByRole("button", { name: "Unsave story" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
+    const unsave = screen.getByRole("button", { name: "Unsave story" });
+    expect(unsave).toHaveAttribute("aria-pressed", "true");
+    expect(unsave.textContent).toContain("Saved");
   });
 
-  it("toggles via onToggleSave with the cluster when the heart is clicked", () => {
+  it("toggles via onToggleSave with the cluster when Save is clicked", () => {
     const onToggleSave = vi.fn();
     render(
       <StoryCard
@@ -157,7 +157,7 @@ describe("StoryCard", () => {
     expect(onToggleSave).toHaveBeenCalledWith(cluster);
   });
 
-  it("omits the heart entirely when no save handler is wired", () => {
+  it("omits the Save button entirely when no save handler is wired", () => {
     render(<StoryCard cluster={cluster} onOpen={vi.fn()} />);
     expect(screen.queryByRole("button", { name: /save story/i })).not.toBeInTheDocument();
   });

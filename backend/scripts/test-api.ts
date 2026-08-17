@@ -292,70 +292,6 @@ async function main() {
     check("overlong id -> 400", huge.status === 400);
   }
 
-  console.log("== test: GET /api/tone-radar ==");
-  {
-    const r = await api("/api/tone-radar");
-    check("200", r.status === 200);
-    check("computedAt present", typeof r.json?.computedAt === "string");
-    const outlets = r.json?.outlets ?? [];
-    check("6 outlets from seeded framings", outlets.length === 6);
-    const bbc = outlets.find((o: any) => o.source === "BBC");
-    check("BBC: 3 frames, 2 spun (celebratory x2)", bbc?.frames === 3 && bbc?.spun === 2);
-    check("BBC spinRatio 2/3", Math.abs((bbc?.spinRatio ?? 0) - 2 / 3) < 1e-9);
-    check("tone counts tracked", bbc?.tones?.celebratory === 2 && bbc?.tones?.neutral === 1);
-    const cnn = outlets.find((o: any) => o.source === "CNN");
-    check("analytical-only outlet not spun", cnn?.frames === 1 && cnn?.spun === 0);
-    check("sorted by spinRatio desc", outlets[0].source === "BBC");
-  }
-
-  console.log("== test: GET /api/tone-radar?category= ==");
-  {
-    const r = await api("/api/tone-radar?category=culture-sport");
-    check("200", r.status === 200);
-    check("category echoed", r.json?.category === "culture-sport");
-    const sport = r.json?.outlets ?? [];
-    check("only culture-sport outlets (AP+BBC, no CNN)", sport.length === 2 && !sport.some((o: any) => o.source === "CNN"));
-    const ap = sport.find((o: any) => o.source === "AP");
-    check("AP: 2 frames, 1 spun (world-cup frame is neutral)", ap?.frames === 2 && ap?.spun === 1 && ap?.tones?.neutral === 1);
-
-    const crime = await api("/api/tone-radar?category=crime-justice");
-    const crimeOutlets = crime.json?.outlets ?? [];
-    check("crime-justice: 3 outlets", crimeOutlets.length === 3);
-    const bbc = crimeOutlets.find((o: any) => o.source === "BBC");
-    check("BBC there: 1 neutral frame, not spun", bbc?.frames === 1 && bbc?.spun === 0);
-
-    const world = await api("/api/tone-radar?category=world");
-    check("empty category -> empty list", world.json?.outlets?.length === 0 && world.status === 200);
-    const bogus = await api("/api/tone-radar?category=bogus");
-    check("invalid category -> 400", bogus.status === 400);
-  }
-
-  console.log("== test: GET /api/outlets/:name ==");
-  {
-    const bbc = await api("/api/outlets/BBC");
-    check("200", bbc.status === 200);
-    check("BBC covered in 3 clusters", bbc.json?.clusters?.length === 3);
-    check("full cluster shape", bbc.json?.clusters?.every((c: any) => Array.isArray(c.articles)));
-    check("stat: 3 frames, 2 spun", bbc.json?.stat?.frames === 3 && bbc.json?.stat?.spun === 2);
-    check("spinRatio 2/3", Math.abs((bbc.json?.stat?.spinRatio ?? 0) - 2 / 3) < 1e-9);
-    check("tones tracked", bbc.json?.stat?.tones?.celebratory === 2 && bbc.json?.stat?.tones?.neutral === 1);
-
-    const reuters = await api("/api/outlets/Reuters");
-    check("Reuters in 2 clusters, 0 spun", reuters.json?.clusters?.length === 2 && reuters.json?.stat?.spun === 0);
-
-    const none = await api("/api/outlets/NonexistentOutlet");
-    check("unknown outlet -> empty list + zero stat", none.json?.clusters?.length === 0 && none.json?.stat?.frames === 0 && none.json?.stat?.spinRatio === 0);
-
-    const paged = await api("/api/outlets/BBC?limit=1");
-    check("limit honored + hasMore", paged.json?.clusters?.length === 1 && paged.json?.hasMore === true);
-
-    const badLimit = await api("/api/outlets/BBC?limit=99");
-    check("invalid limit -> 400", badLimit.status === 400);
-    const badName = await api(`/api/outlets/${"x".repeat(101)}`);
-    check("overlong name -> 400", badName.status === 400);
-    check("cache-control public", bbc.headers.get("cache-control") === "public, max-age=60");
-  }
-
   console.log("== test: GET /story/:id (OG share page) ==");
   {
     const r = await api("/story/1");
@@ -446,61 +382,7 @@ async function main() {
     check("ACAO echoes allowed origin", res.headers.get("access-control-allow-origin") === "http://localhost:5173");
   }
 
-  console.log("== test: GET /api/runs event log endpoint ==");
-{
-  const runsDb = new MemoryDb();
-  await seedFixtures(runsDb);
-  const runsApp = createApp(runsDb);
-  const runsEnv = { GEMINI_API_KEY: "", CRON_SECRET: SECRET, DB: {} } as Env;
-  await runsDb.recordPipelineRun({
-    startedAt: new Date(Date.now() - 120_000),
-    finishedAt: new Date(Date.now() - 119_000),
-    scraped: 100,
-    newArticles: 20,
-    clusters: 3,
-    framed: 3,
-    failed: 0,
-    skipped: 0,
-    error: null,
-  });
-  await runsDb.recordPipelineRun({
-    startedAt: new Date(Date.now() - 60_000),
-    finishedAt: new Date(Date.now() - 59_000),
-    scraped: 80,
-    newArticles: 5,
-    clusters: 1,
-    framed: 0,
-    failed: 1,
-    skipped: 0,
-    error: "Gemini HTTP 500",
-  });
-  const res = await runsApp.request("/api/runs", {}, runsEnv);
-  const body = (await res.json()) as { runs: any[]; backlog: number };
-  check("200", res.status === 200);
-  check("runs newest first", body.runs[0].scraped === 80 && body.runs[1].scraped === 100);
-  check("no-store cache", res.headers.get("cache-control") === "no-store");
-  check("error surfaced", body.runs[0].error === "Gemini HTTP 500");
-  // Unframed cluster -> the framing backlog is surfaced to the SPA footer.
-  await runsDb.insertArticles([
-    {
-      dedupKey: "seed|BBC|Unframed",
-      source: "BBC",
-      title: "Unframed story",
-      url: "https://bbc.example/unframed",
-      lede: "",
-      publishedAt: new Date(),
-      imageUrl: "",
-    },
-  ]);
-  await runsDb.createCluster("Unframed cluster", ["seed|BBC|Unframed"], new Date(), "unframed-sig");
-  const res2 = await runsApp.request("/api/runs", {}, runsEnv);
-  const body2 = (await res2.json()) as { backlog: number };
-  check("backlog counts unframed clusters", body2.backlog === 1);
-  const bad = await runsApp.request("/api/runs?limit=99", {}, runsEnv);
-  check("invalid limit -> 400", bad.status === 400);
-}
-
-console.log("== test: unknown route ==");
+  console.log("== test: unknown route ==");
   {
     const r = await api("/api/nope");
     check("404 for unknown api route", r.status === 404);

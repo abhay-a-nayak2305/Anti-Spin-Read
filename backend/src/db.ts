@@ -55,21 +55,10 @@ export interface Db {
   /** A single cluster by numeric id — null when missing (e.g. purged). */
   clusterById(id: string): Promise<ClusterRecord | null>;
   /**
-   * Clusters containing at least one article from `source` (canonical
-   * outlet label), newest first — powers the per-outlet page.
-   */
-  clustersByOutlet(
-    source: string,
-    limit: number,
-    offset?: number
-  ): Promise<ClusterRecord[]>;
-  /**
    * Cluster ids + last-seen for sitemap generation (no article/framing
    * payload — a light read for crawlers).
    */
   sitemapMeta(limit: number): Promise<{ id: string; seenAt: Date }[]>;
-  /** Count of clusters still awaiting framing (framing IS NULL). */
-  framingBacklogCount(): Promise<number>;
   /**
    * Clusters whose framing is still NULL (never attempted or failed),
    * oldest first — the retry queue for the pipeline.
@@ -349,29 +338,6 @@ export class D1Db implements Db {
     return hydrated[0] ?? null;
   }
 
-  async clustersByOutlet(
-    source: string,
-    limit: number,
-    offset = 0
-  ): Promise<ClusterRecord[]> {
-    const { results } = await this.env
-      .prepare(
-        `SELECT c.id AS c_id, c.key_phrase, c.seen_at, c.framed_at, c.framing_error, c.framing
-         FROM clusters c
-         WHERE EXISTS (
-           SELECT 1
-           FROM cluster_articles ca
-           JOIN articles a ON a.dedup_key = ca.dedup_key
-           WHERE ca.cluster_id = c.id AND a.source = ?
-         )
-         ORDER BY c.seen_at DESC
-         LIMIT ? OFFSET ?`
-      )
-      .bind(source, limit, offset)
-      .all();
-    return this.hydrate(results);
-  }
-
   async sitemapMeta(limit: number): Promise<{ id: string; seenAt: Date }[]> {
     const { results } = await this.env
       .prepare(
@@ -383,13 +349,6 @@ export class D1Db implements Db {
       id: String(r.id),
       seenAt: new Date(Number(r.seen_at)),
     }));
-  }
-
-  async framingBacklogCount(): Promise<number> {
-    const { results } = await this.env
-      .prepare("SELECT COUNT(*) AS n FROM clusters WHERE framing IS NULL")
-      .all();
-    return Number(results[0]?.n ?? 0);
   }
 
   /**

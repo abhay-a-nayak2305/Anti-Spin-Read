@@ -54,7 +54,6 @@ Everything runs on Cloudflare's free tier:
 │  Read API (Hono routes)                                             │
 │    GET  /api/health      liveness                                  │
 │    GET  /api/clusters    paginated, edge-cached 60s                │
-│    GET  /api/runs        recent pipeline runs, no-store            │
 │    POST /api/cron        manual trigger (secret + rate limit)      │
 │    GET  /*               SPA from ASSETS (run_worker_first)        │
 └──────────────────────────────┬──────────────────────────────────────┘
@@ -136,7 +135,9 @@ content. Failures record a sanitized `framing_error` on the cluster and the
    24h, gated by `meta.last_purge_ms` (migration 0004) — maintenance is
    rate-limited by the meta table, not by clock time.
 7. **Record.** One row per run (success *or* failure) is appended to
-   `pipeline_runs` (migration 0005), surfaced via `GET /api/runs`.
+   `pipeline_runs` (migration 0005). No read API exposes it — the nightly
+   `check-pipeline-health.ts` job reads the log directly via
+   `wrangler d1 execute`.
 
 ### Pipeline lock
 
@@ -183,20 +184,6 @@ it, so even a fully frozen invocation can block the pipeline for at most
 - **`GET /api/clusters/:id`** — single story for shareable `#/story/<id>`
   deep links; 404 (uncached) when the story was purged by the 14-day
   retention.
-- **`GET /api/tone-radar`** — per-outlet spin share aggregated from the
-  `toneTags` already stored in the last 200 framed clusters. No new
-  storage or pipeline work — just an aggregate read, 60s edge-cached.
-  `?category=` (one of the 8 keyword category ids) widens the scan to the
-  last 1000 clusters and aggregates only matches — the tone radar panel's
-  category chips. Powers the tone-radar panel under the grid.
-- **`GET /api/outlets/:name`** — one outlet's stories (newest first,
-  `limit` 1–50) plus its own tone stats aggregated from those clusters'
-  `toneTags`. Keyed on the canonical `articles.source`; radar tone-tag keys
-  (Gemini-derived) can differ, so an outlet page can legitimately be empty.
-  60s edge-cached. Powers the `#/outlet/<name>` view.
-- **`GET /api/runs`** — recent pipeline runs, newest first, plus `backlog`
-  (count of clusters awaiting framing), `Cache-Control: no-store`
-  (operators want fresh state). Powers the footer's pipeline status strip.
 - **`GET /story/:id`** — server-rendered OG/Twitter/JSON-LD share page so
   crawlers and link previewers get markup without JS. All feed text is
   HTML-escaped and the JSON-LD blob escapes `<`/`>` (a feed title containing
@@ -256,8 +243,8 @@ on read** (`parseFraming` skips corrupt rows at query time — never served).
   (level, ts, requestId, ip, method, path, status, ms); paths only, never raw
   query strings (URLs in query params can carry sensitive fragments).
 - **Pipeline event log in D1** (`pipeline_runs`) — success and failure rows,
-  exposed via `GET /api/runs`; `recordRun` failures are logged and never crash
-  the pipeline.
+  read directly by the nightly `check-pipeline-health.ts` job (no read API
+  route); `recordRun` failures are logged and never crash the pipeline.
 - **Retention** — 14 days of clusters/articles in D1, 90 days of
   `pipeline_runs`; every table is bounded (free tier: 5M rows read/day, 1M
   writes/day — a row per 15 minutes is negligible).

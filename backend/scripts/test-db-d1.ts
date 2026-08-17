@@ -231,30 +231,6 @@ console.log("== test: searchClusters + clusterById (real SQL) ==");
   check("clusterById missing -> null", (await db.clusterById("999999")) === null);
 }
 
-console.log("== test: clustersByOutlet (real SQL) ==");
-{
-  const { db } = makeDb();
-  const a1 = art("BBC", "Story A");
-  const a2 = art("CNN", "Story A");
-  const a3 = art("BBC", "Story B");
-  const a4 = art("AP", "Story C");
-  const id1 = await seedCluster(db, [a1, a2], new Date("2026-08-15T00:00:00Z"), "o-1");
-  const id2 = await seedCluster(db, [a3], new Date("2026-08-16T00:00:00Z"), "o-2");
-  const id3 = await seedCluster(db, [a4], new Date("2026-08-17T00:00:00Z"), "o-3");
-  const bbc = await db.clustersByOutlet("BBC", 10);
-  check("BBC clusters found", bbc.length === 2);
-  check("newest first", bbc[0].id === String(id2) && bbc[1].id === String(id1));
-  check("articles attached", bbc[0].articles.some((a) => a.source === "BBC"));
-  const ap = await db.clustersByOutlet("AP", 10);
-  check("single-outlet cluster found", ap.length === 1 && ap[0].id === String(id3));
-  const none = await db.clustersByOutlet("NPR", 10);
-  check("no match -> empty", none.length === 0);
-  const limited = await db.clustersByOutlet("BBC", 1);
-  check("limit honored", limited.length === 1);
-  const offset = await db.clustersByOutlet("BBC", 1, 1);
-  check("offset honored", offset.length === 1 && offset[0].id === String(id1));
-}
-
 console.log("== test: sitemapMeta ==");
 {
   const { db } = makeDb();
@@ -266,18 +242,6 @@ console.log("== test: sitemapMeta ==");
   check("seenAt carried", meta[2].seenAt.toISOString() === "2026-08-15T00:00:00.000Z");
   const limited = await db.sitemapMeta(2);
   check("limit honored", limited.length === 2);
-}
-
-console.log("== test: framingBacklogCount ==");
-{
-  const { db } = makeDb();
-  const id1 = await seedCluster(db, [art("BBC", "B1"), art("CNN", "B1")], new Date(), "b-1");
-  const id2 = await seedCluster(db, [art("AP", "B2"), art("NPR", "B2")], new Date(), "b-2");
-  check("two unframed", (await db.framingBacklogCount()) === 2);
-  await db.saveFraming(id1, JSON.parse(framingJson()), new Date(), null);
-  check("one framed -> 1", (await db.framingBacklogCount()) === 1);
-  await db.saveFraming(id2, null, null, "boom");
-  check("failed framing still backlog", (await db.framingBacklogCount()) === 1);
 }
 
 console.log("== test: clustersNeedingFraming retry queue ==");

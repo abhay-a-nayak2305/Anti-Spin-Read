@@ -238,36 +238,23 @@ with sync_playwright() as p:
     )
     page.locator("button[aria-label='Close story details']").click()
 
-    print("== pipeline status footer ==")
-    footer = page.locator("footer")
-    # .stamp CSS uppercases the label, so compare case-insensitively
-    check(
-        "footer shows Healthy pipeline stamp",
-        "healthy" in footer.inner_text().lower(),
-        footer.inner_text(),
-    )
-    check(
-        "footer shows last-run relative time",
-        "m ago" in footer.inner_text(),
-        footer.inner_text(),
-    )
-    check(
-        "footer shows zero unframed backlog",
-        "0 unframed" not in footer.inner_text(),  # backlog==0 hides the alarm text
-        footer.inner_text(),
-    )
-
     print("== bookmarks ==")
-    # Heart on the first card (Assad) — unsaved -> saved
-    heart = cards.nth(0).locator("button[aria-label='Save story']")
-    check("unsaved card shows Save heart", heart.count() == 1)
-    heart.click()
+    # Save button on the first card (Assad) — unsaved -> saved
+    save_btn = cards.nth(0).locator("button[aria-label='Save story']")
+    check("unsaved card shows a Save button", save_btn.count() == 1)
     check(
-        "heart flips to saved",
+        "Save button is labeled",
+        "save" in save_btn.inner_text().lower(),
+        save_btn.inner_text(),
+    )
+    save_btn.click()
+    check(
+        "Save flips to saved",
         cards.nth(0).locator("button[aria-label='Unsave story']").count() == 1,
     )
     # SAVED chip reflects the count and filters to the saved story
-    saved_chip = page.locator("button", has_text="SAVED")
+    filter_group = page.locator("[aria-label='Filter stories by category']")
+    saved_chip = filter_group.locator("button", has_text="SAVED")
     check("SAVED chip shows count 1", "1" in saved_chip.inner_text(), saved_chip.inner_text())
     saved_chip.click()
     expect(page.locator("article")).to_have_count(1)
@@ -275,57 +262,15 @@ with sync_playwright() as p:
         "SAVED filter shows only the saved story",
         "Assad" in page.locator("article").nth(0).locator("h3").inner_text(),
     )
-    check(
-        "tone radar hidden in SAVED view",
-        page.locator("text=Tone radar").count() == 0,
-    )
-    page.locator("button", has_text="SAVED").click()  # back to ALL
+    filter_group.locator("button", has_text="SAVED").click()  # back to ALL
     expect(page.locator("article")).to_have_count(SEED_CARD_COUNT)
 
     print("== bookmarks survive reload (localStorage) ==")
     page.reload(wait_until="networkidle", timeout=30000)
     expect(page.locator("article")).to_have_count(SEED_CARD_COUNT)
     check(
-        "heart still saved after reload",
+        "save state persists after reload",
         page.locator("article").nth(0).locator("button[aria-label='Unsave story']").count() == 1,
-    )
-
-    print("== outlet view via radar ==")
-    radar = page.locator("section[aria-label*='Tone radar']")
-    check("radar section present", radar.count() == 1)
-    bbc_row = radar.locator("button", has_text="BBC").first
-    bbc_row.click()
-    page.wait_for_url("**#/outlet/BBC**", timeout=10000)
-    check(
-        "radar outlet click navigates to #/outlet/BBC",
-        "#/outlet/BBC" in page.url,
-        page.url,
-    )
-    expect(page.locator("h2", has_text="BBC")).to_be_visible()
-    check("outlet page headline shows BBC", "BBC" in page.locator("h2").first.inner_text())
-    outlet_stat = page.locator("text=framed stories").count()
-    check("outlet stat line renders", outlet_stat == 1)
-    # BBC covers 3 of the seeded clusters
-    expect(page.locator("article")).to_have_count(3)
-    check("outlet page lists BBC's 3 stories", page.locator("article").count() == 3)
-    check(
-        "radar hidden on outlet page",
-        page.locator("section[aria-label*='Tone radar']").count() == 0,
-    )
-    # opening a story from the outlet view restores the outlet hash on close
-    page.locator("article").nth(0).locator("h3").click()
-    check("story modal opens from outlet view", page.locator("[role=dialog]").count() == 1)
-    page.locator("button[aria-label='Close story details']").click()
-    check(
-        "closing modal returns to #/outlet/BBC",
-        "#/outlet/BBC" in page.url,
-        page.url,
-    )
-    page.locator("button", has_text="radar").first.click()
-    check(
-        "back button leaves outlet view",
-        "#/outlet/" not in page.url,
-        page.url,
     )
 
     print("== mobile pass ==")

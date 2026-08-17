@@ -69,6 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Save button.** The bookmark heart (a low-contrast glyph) is now a
+  labeled `♥ Save` / `♥ Saved` chip styled in the story's category color
+  (outlined chip in the category accent when unsaved, category fill when
+  saved) — on every card and in the story modal. `aria-label`/`aria-pressed`
+  contract unchanged.
 - **Pipeline watchdog.** Every run races a 12-minute timer; if it fires, the
   run records `pipeline watchdog: stuck in stage "X"` (stage markers at
   scrape/insert/cluster/enrich/queue/frame/maintain pin down the hang) and
@@ -92,8 +97,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   minutes, so every card reliably gets its full framing report. When the
   queue is empty the run bails after a single read (before the lock) and
   records nothing — an idle framing cron costs ~1 D1 read per run.
-
-### Changed
 
 - **Every story card now shows an image.** Cards whose articles have no
   og:image used to render a bare "NO IMAGE" box; the hero now always runs
@@ -121,6 +124,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and ink offset shadow were invisible against the black page; both are
   white now (solid `border-paper` outline + white offset shadow), the
   stamp's dashed border is gone, and text selection highlights white.
+
+### Removed
+
+- **Tone radar panel + per-category radar filters.** The radar
+  visualization under the grid, its category chips, and the
+  `GET /api/tone-radar` endpoint are gone — the spin-share aggregate
+  (and its tone-tag-vs-source keying mismatch) was judged unnecessary.
+- **Per-outlet pages.** The `#/outlet/<name>` view, `OutletView`, and
+  `GET /api/outlets/:name` are removed with the radar that linked to
+  them.
+- **Pipeline status footer.** The footer's "Healthy · 12m ago · N
+  unframed" strip, `PipelineStatus`, and the `GET /api/runs` endpoint are
+  gone. Pipeline health stays fully covered by the nightly
+  `check-pipeline-health.ts` job (reads D1 directly) — the signal was
+  removed from the page, not from monitoring.
+- Corresponding Db methods (`clustersByOutlet`, `framingBacklogCount`),
+  types, tests (backend, vitest, Playwright), and docs were removed with
+  the features. The `pipeline_runs` event log itself is untouched — the
+  pipeline still records every run.
 
 ### Fixed
 

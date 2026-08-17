@@ -81,7 +81,7 @@ export function StoryModal({
   onClose: () => void;
   /** Story is in the reader's saved bookmarks. */
   saved?: boolean;
-  /** Wired by App — omitted in tests and standalone usage → no heart button. */
+  /** Wired by App — omitted in tests and standalone usage → no Save button. */
   onToggleSave?: (c: Cluster) => void;
 }) {
   const f = cluster.framing;
@@ -175,11 +175,11 @@ export function StoryModal({
                   aria-label={saved ? "Unsave story" : "Save story"}
                   aria-pressed={saved}
                   title={saved ? "Unsave story" : "Save story"}
-                  className={`border-none bg-transparent p-0 text-[11px] leading-none transition-colors hover:text-alarm ${
-                    saved ? "text-alarm" : "text-ink/40"
+                  className={`stamp text-[10px] transition-transform hover:-translate-y-0.5 ${
+                    saved ? meta.fill : `bg-paper ${meta.text}`
                   }`}
                 >
-                  ♥
+                  {saved ? "♥ Saved" : "♥ Save"}
                 </button>
               )}
               <SourceCountBadge count={sourceCount} className="gap-1.5" />

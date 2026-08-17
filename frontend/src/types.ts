@@ -49,60 +49,6 @@ export interface SearchResponse {
   clusters: Cluster[];
 }
 
-/** Per-outlet spin aggregate from /api/tone-radar (last 200 framed stories). */
-export interface ToneRadarOutlet {
-  source: string;
-  frames: number;
-  spun: number;
-  spinRatio: number;
-  tones: Record<string, number>;
-}
-
-export interface ToneRadarResponse {
-  computedAt: string;
-  /** Echo of the requested category; null when no category filter was sent. */
-  category?: string | null;
-  outlets: ToneRadarOutlet[];
-}
-
-/** Per-outlet aggregates from /api/outlets/:name — zero-filled when the
- * outlet has no framed clusters. */
-export interface OutletStat {
-  source: string;
-  frames: number;
-  spun: number;
-  spinRatio: number;
-  tones: Record<string, number>;
-}
-
-export interface OutletResponse {
-  outlet: string;
-  hasMore: boolean;
-  stat: OutletStat;
-  clusters: Cluster[];
-}
-
-/** One entry of the pipeline run event log from /api/runs. */
-export interface PipelineRun {
-  id: number;
-  startedAt: string;
-  finishedAt: string;
-  scraped: number;
-  newArticles: number;
-  clusters: number;
-  framed: number;
-  failed: number;
-  /** 1 when the run was skipped because another run held the lock; 0 otherwise. */
-  skipped: number;
-  error: string | null;
-}
-
-export interface RunsResponse {
-  runs: PipelineRun[];
-  /** Unframed clusters still awaiting framing. */
-  backlog: number;
-}
-
 const TONE_COLORS: Record<string, string> = {
   neutral: "bg-paper text-ink",
   urgent: "bg-cat-business text-ink",

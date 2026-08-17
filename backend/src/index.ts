@@ -7,7 +7,7 @@ import type {
 import { D1Db } from "./db.js";
 import { runPipeline } from "./pipeline.js";
 import { workerConfig, allowedOrigins, FRAMING_CRON_SCHEDULE } from "./config.js";
-import { categorizeCluster, CATEGORY_IDS } from "./categorize.js";
+import { categorizeCluster } from "./categorize.js";
 import { isSafeHttpUrl } from "./images.js";
 import { createSlidingWindowLimiter } from "./rate-limit.js";
 import type { Db } from "./db.js";
@@ -15,13 +15,6 @@ import type { ClusterRecord, Env } from "./types.js";
 
 const RATE_WINDOW_MS = 10 * 60_000;
 
-/** Tone radar aggregates toneTags over the last N framed clusters. */
-const RADAR_CLUSTERS = 200;
-/**
- * Category-filtered radar scans more clusters so smaller categories still
- * get a meaningful sample (categorizeCluster is cheap keyword scoring).
- */
-const RADAR_CATEGORY_SCAN = 1000;
 /** Sitemap caps at 10k URLs (14-day retention keeps the real count far lower). */
 const SITEMAP_MAX = 10_000;
 
@@ -84,34 +77,7 @@ function esc(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/** Per-outlet tone aggregation shared by the radar and outlet routes. */
-function aggregateToneTags(clusters: ClusterRecord[]) {
-  const outlets = new Map<
-    string,
-    { source: string; frames: number; spun: number; tones: Record<string, number> }
-  >();
-  for (const cl of clusters) {
-    if (!cl.framing) continue;
-    for (const t of cl.framing.toneTags) {
-      let o = outlets.get(t.source);
-      if (!o) {
-        o = { source: t.source, frames: 0, spun: 0, tones: {} };
-        outlets.set(t.source, o);
-      }
-      o.frames++;
-      o.tones[t.tone] = (o.tones[t.tone] ?? 0) + 1;
-      // Spin = any non-neutral, non-analytical tone (urgent/alarmist/
-      // skeptical/celebratory — anything that colors the framing).
-      if (t.tone !== "neutral" && t.tone !== "analytical") o.spun++;
-    }
-  }
-  return [...outlets.values()]
-    .map((o) => ({
-      ...o,
-      spinRatio: o.frames > 0 ? o.spun / o.frames : 0,
-    }))
-    .sort((a, b) => b.spinRatio - a.spinRatio || b.frames - a.frames);
-}
+
 
 /** Best available one-line description for a cluster (OG meta). */
 function ogDescription(cl: ClusterRecord): string {
@@ -395,120 +361,6 @@ export function createApp(db?: Db) {
       return res;
     } catch (err) {
       console.error("[api] cluster failed:", err);
-      return c.json({ error: "internal error" }, 500);
-    }
-  });
-
-  // Tone radar: per-outlet spin share across the last 200 framed clusters
-  // (1000 when ?category= filters by the deterministic keyword category),
-  // aggregated from the toneTags the framing stage already stores. No new
-  // storage or pipeline work — just aggregate reads, 60s edge-cached.
-  app.get("/api/tone-radar", async (c) => {
-    try {
-      const rawCategory = c.req.query("category");
-      let category: string | null = null;
-      if (rawCategory !== undefined && rawCategory !== null && rawCategory !== "") {
-        if (!CATEGORY_IDS.includes(rawCategory as (typeof CATEGORY_IDS)[number])) {
-          return c.json({ error: "invalid category" }, 400);
-        }
-        category = rawCategory;
-      }
-      const cached = await edgeCacheHit(c.req.url);
-      if (cached) return cached;
-      const rows = await resolveDb(c.env).latestClusters(
-        category ? RADAR_CATEGORY_SCAN : RADAR_CLUSTERS
-      );
-      const forAgg = category
-        ? rows.filter((cl) => categorizeCluster(cl) === category)
-        : rows;
-      const list = aggregateToneTags(forAgg);
-      c.header("Cache-Control", "public, max-age=60");
-      const res = c.json({
-        computedAt: new Date().toISOString(),
-        category,
-        outlets: list,
-      });
-      const put = edgeCachePut(c.req.url, res);
-      if (put) c.executionCtx.waitUntil(put);
-      return res;
-    } catch (err) {
-      console.error("[api] tone-radar failed:", err);
-      return c.json({ error: "internal error" }, 500);
-    }
-  });
-
-  // Per-outlet page: clusters covered by one outlet, newest first, plus the
-  // outlet's own tone stats aggregated from those clusters' toneTags.
-  // Keyed on the canonical article source label; the radar's toneTag keys
-  // (Gemini-derived) can differ — a mismatch simply yields an empty list.
-  app.get("/api/outlets/:name", async (c) => {
-    try {
-      const rawName = c.req.param("name");
-      if (!rawName || rawName.length > 100) {
-        return c.json({ error: "invalid outlet name" }, 400);
-      }
-      const rawLimit = Number(c.req.query("limit") ?? "50");
-      const limit =
-        Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 50
-          ? rawLimit
-          : null;
-      if (limit === null) {
-        return c.json({ error: "invalid limit" }, 400);
-      }
-      const cached = await edgeCacheHit(c.req.url);
-      if (cached) return cached;
-      const rows = await resolveDb(c.env).clustersByOutlet(rawName, limit + 1);
-      const hasMore = rows.length > limit;
-      const framedRows = rows.filter((cl) => cl.framing);
-      const stat = aggregateToneTags(framedRows).find((o) => o.source === rawName);
-      c.header("Cache-Control", "public, max-age=60");
-      const res = c.json({
-        outlet: rawName,
-        hasMore,
-        stat: stat ?? { source: rawName, frames: 0, spun: 0, tones: {}, spinRatio: 0 },
-        clusters: rows.slice(0, limit).map(toApiCluster),
-      });
-      const put = edgeCachePut(c.req.url, res);
-      if (put) c.executionCtx.waitUntil(put);
-      return res;
-    } catch (err) {
-      console.error("[api] outlets failed:", err);
-      return c.json({ error: "internal error" }, 500);
-    }
-  });
-
-  // Ops endpoint: recent pipeline runs from the event log (newest first).
-  // Not cached — operators want fresh state.
-  app.get("/api/runs", async (c) => {
-    try {
-      const rawLimit = Number(c.req.query("limit") ?? "10");
-      const limit =
-        Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 20
-          ? rawLimit
-          : null;
-      if (limit === null) {
-        return c.json({ error: "invalid limit" }, 400);
-      }
-      const runs = await resolveDb(c.env).latestPipelineRuns(limit);
-      const backlog = await resolveDb(c.env).framingBacklogCount();
-      c.header("Cache-Control", "no-store");
-      return c.json({
-        runs: runs.map((r) => ({
-          id: r.id,
-          startedAt: r.startedAt.toISOString(),
-          finishedAt: r.finishedAt.toISOString(),
-          scraped: r.scraped,
-          newArticles: r.newArticles,
-          clusters: r.clusters,
-          framed: r.framed,
-          failed: r.failed,
-          skipped: r.skipped,
-          error: r.error,
-        })),
-        backlog,
-      });
-    } catch (err) {
-      console.error("[api] runs failed:", err);
       return c.json({ error: "internal error" }, 500);
     }
   });

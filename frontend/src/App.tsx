@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { OutletView } from "./components/OutletView";
-import { PipelineStatus } from "./components/PipelineStatus";
 import { SearchBox } from "./components/SearchBox";
 import { StoryCard } from "./components/StoryCard";
 import { StoryModal } from "./components/StoryModal";
-import { ToneRadar } from "./components/ToneRadar";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { useClusters } from "./hooks/useClusters";
 import { useSearch } from "./hooks/useSearch";
@@ -123,9 +120,6 @@ export default function App() {
   // (opening a card sets the hash; the hashchange would otherwise refetch).
   const selectedIdRef = useRef<string | null>(null);
 
-  // Active #/outlet/<name> route (decoded name) — null in the main view.
-  const [outletName, setOutletName] = useState<string | null>(null);
-
   // SAVED view: bookmarked clusters the loaded feed doesn't hold are
   // fetched individually (404 = pruned = skipped).
   const [savedExtra, setSavedExtra] = useState<Cluster[]>([]);
@@ -146,16 +140,6 @@ export default function App() {
 
   const closeModal = useCallback(() => {
     setSelected(null);
-    // While in the outlet view, closing the story returns to the outlet —
-    // not to the plain pathname the story link replaced.
-    const target = outletName
-      ? `${window.location.pathname}${window.location.search}#/outlet/${encodeURIComponent(outletName)}`
-      : window.location.pathname + window.location.search;
-    window.history.replaceState(null, "", target);
-  }, [outletName]);
-
-  const closeOutlet = useCallback(() => {
-    setOutletName(null);
     window.history.replaceState(
       null,
       "",
@@ -165,23 +149,10 @@ export default function App() {
 
   // Opening a shared #/story/<id> URL loads that story from the API. A 404
   // (story pruned after 14 days) surfaces as a dismissible notice instead
-  // of a silent dead link. The #/outlet/<name> route switches the view.
+  // of a silent dead link.
   useEffect(() => {
     const openFromHash = async () => {
       const hash = window.location.hash;
-
-      const outletMatch = hash.match(/^#\/outlet\/([^/]+)$/);
-      if (outletMatch) {
-        let name: string;
-        try {
-          name = decodeURIComponent(outletMatch[1]);
-        } catch {
-          return; // malformed percent-encoding — ignore the route
-        }
-        if (name.length === 0 || name.length > 100) return;
-        setOutletName(name);
-        return;
-      }
 
       const m = hash.match(/^#\/story\/(\d+)$/);
       if (m) {
@@ -210,10 +181,6 @@ export default function App() {
         }
         return;
       }
-
-      // No story or outlet route (e.g. Back out of a hash link) — leave the
-      // outlet view so state and URL can't drift apart.
-      setOutletName(null);
     };
     window.addEventListener("hashchange", openFromHash);
     void openFromHash();
@@ -281,7 +248,6 @@ export default function App() {
 
   const search = useSearch();
   const searching = search.q !== "";
-  const inOutletView = outletName !== null;
 
   return (
     <div className="min-h-screen">
@@ -346,7 +312,7 @@ export default function App() {
           </div>
         )}
 
-        {!searching && !inOutletView && (
+        {!searching && (
           <CategoryFilter
             active={filter}
             counts={counts}
@@ -356,17 +322,7 @@ export default function App() {
         )}
 
         <div className="mt-8 space-y-8">
-          {outletName !== null && !searching ? (
-            <OutletView
-              name={outletName}
-              onOpen={openModal}
-              onBack={closeOutlet}
-              isSaved={isSaved}
-              onToggleSave={(c) => toggle(c.id)}
-            />
-          ) : (
-            <>
-              {loading && (
+          {loading && (
                 <div className="slab--flat border-dashed p-8 text-center">
                   <p className="font-display text-lg uppercase">
                     Loading fresh stories…
@@ -425,7 +381,7 @@ export default function App() {
                           Nothing saved yet
                         </p>
                         <p className="mt-2 text-sm text-ink/70">
-                          Tap the ♥ on any story to bookmark it.
+                          Tap Save on any story to bookmark it.
                         </p>
                       </>
                     ) : (
@@ -529,10 +485,6 @@ export default function App() {
                   </button>
                 </div>
               )}
-
-              {!searching && filter !== "saved" && <ToneRadar />}
-            </>
-          )}
         </div>
       </main>
 
@@ -541,7 +493,6 @@ export default function App() {
           Headlines link to original articles · Google News RSS · Framing by
           Gemini · Updated every 15 minutes
         </div>
-        <PipelineStatus />
       </footer>
 
       {selected && (
