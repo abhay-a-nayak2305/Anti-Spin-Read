@@ -28,8 +28,12 @@
   ],
 
   // Pipeline runs automatically every 15 minutes — no GitHub Actions needed.
+  // The second schedule is the framing-only cron (drains the unframed retry
+  // queue, up to 14 clusters per run, with no RSS/enrich subrequests). It
+  // MUST match FRAMING_CRON_SCHEDULE in src/config.ts — the scheduled
+  // handler dispatches on the exact schedule string.
   "triggers": {
-    "crons": ["*/15 * * * *"]
+    "crons": ["*/15 * * * *", "7,22,37,52 * * * *"]
   },
 
   // Non-secret config. Secrets (GEMINI_API_KEY, CRON_SECRET) go through:

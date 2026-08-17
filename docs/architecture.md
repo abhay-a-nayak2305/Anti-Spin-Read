@@ -15,7 +15,14 @@ Everything runs on Cloudflare's free tier:
 - **D1** (SQLite) is the *only* store — articles, clusters, framing JSON, the
   pipeline lock, maintenance state, and the pipeline event log.
 - A **cron trigger** (`*/15 * * * *`) runs the pipeline automatically; no
-  external scheduler.
+  external scheduler. A second trigger (`FRAMING_CRON_SCHEDULE` in
+  `backend/src/config.ts`, `7,22,37,52 * * * *`) runs the same pipeline in
+  **framing-only mode**: it skips scrape/dedup/enrich and frames only the
+  retry queue (up to 14 clusters per run — 14 × 3 worst-case Gemini
+  attempts = 42 subrequests < 50), so an unframed backlog can never linger.
+  The `scheduled` handler dispatches on the exact schedule string
+  (`controller.cron === FRAMING_CRON_SCHEDULE`); the two strings must stay
+  in sync.
 - Workers are **stateless** — all durable state lives in D1 (the rate limiter
   is per-isolate in-memory by design; see below).
 
@@ -23,7 +30,8 @@ Everything runs on Cloudflare's free tier:
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Cloudflare Worker (single deployable, backend/src/index.ts)        │
 │                                                                     │
-│  Cron trigger */15 * * * * ──▶ scheduled handler                    │
+│  Cron */15 * * * * ──▶ scheduled handler ──▶ runPipeline            │
+│  Cron 7,22,37,52 * * ─▶ scheduled handler ──▶ runPipeline(framingOnly)│
 │        │                                                            │
 │        ▼                                                            │
 │  runPipeline (backend/src/pipeline.ts)                              │
@@ -37,6 +45,8 @@ Everything runs on Cloudflare's free tier:
 │    5. frame: Gemini with responseSchema + model fallback            │
 │        · framing JSON validated by normalizeFraming (framing-schema)│
 │        · failures recorded, retried from queue (3+2 attempts)       │
+│        · framing-only runs: steps 1-4 skipped, queue-only, 14 max   │
+│        · idle guard: empty queue → one read, no lock/run-log writes │
 │    6. maintain: 14-day retention purge (+90d run log), ≤ once per 24h   │
 │        · gated by meta.last_purge_ms (migration 0004)               │
 │    7. record: pipeline_runs event log row (migration 0005)          │
@@ -107,9 +117,17 @@ One full run: `scrape → dedup/insert → cluster → enrich → frame → main
    up. Output is validated by `normalizeFraming` **at rest**: the same
    structural rules that accept model output also gate what's persisted and
    what's served back from D1, so a corrupted row can never surface as valid
-   content. Failures record a sanitized `framing_error` on the cluster and the
-   cluster joins the retry queue (`clustersNeedingFraming`, oldest first,
-   batch of 50) for the next run.
+content. Failures record a sanitized `framing_error` on the cluster and the
+    cluster joins the retry queue (`clustersNeedingFraming`, oldest first,
+    batch of 50) for the next run.
+    **Framing-only mode** (second cron trigger) skips steps 1–4 entirely, so
+    the whole free-tier subrequest budget goes to Gemini:
+    `FRAMING_ONLY_BATCH = 14` × 3 worst-case attempts = 42 < 50 (≥8 headroom).
+    Normal runs cap at `FRAMING_BATCH = 3` (new clusters first) so the burst
+    never exhausts the 50-subrequest budget; the framing cron drains the
+    leftover retry queue every 15 minutes. When the queue is empty the run
+    bails after a single `clustersNeedingFraming(1)` read — before the lock —
+    and records nothing, so an idle framing cron costs ~1 read per run.
 6. **Maintain.** Retention purge: clusters older than 14 days are deleted
    (cascading `cluster_articles` via FK), articles older than the cutoff
    that are no longer referenced by any cluster are removed as orphans, and

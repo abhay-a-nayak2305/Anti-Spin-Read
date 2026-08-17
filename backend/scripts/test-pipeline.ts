@@ -299,6 +299,155 @@ console.log("\n== test: framing batch cap (subrequest budget) ==");
   check("retry queue empty", (await db.clustersNeedingFraming(50)).length === 0);
 }
 
+console.log("\n== test: framing-only mode (framing cron) ==");
+{
+  const db = new MemoryDb();
+  const recent = new Date();
+  const stories = [
+    "krill farming dispute",
+    "tunnel collapse probe",
+    "vaccine trial halted",
+    "monsoon floods north",
+    "airport strike chaos",
+    "peace talks resume",
+    "chip export ban",
+    "wildfire smoke warning",
+    "dockworkers wage deal",
+    "satellite launch failure",
+    "bank merger approved",
+    "heatwave power cuts",
+  ];
+  const scrapeAll = async () =>
+    stories.flatMap((s, i) => [
+      { ...article(`a${i}`, `${s} escalates`, "bbc"), publishedAt: recent },
+      { ...article(`b${i}`, `${s}: what we know`, "cnn"), publishedAt: recent },
+    ]);
+
+  // Normal run creates the 12 clusters but only frames 3 (FRAMING_BATCH).
+  const r0 = await runPipeline(env, db, {
+    scrape: scrapeAll,
+    frame: async () => framing("seed"),
+    enrich: async () => 0,
+  });
+  check("seed run: 12 clusters, 3 framed", r0.clusters === 12 && r0.framed === 3, JSON.stringify(r0));
+  check("9 unframed in retry queue", (await db.clustersNeedingFraming(50)).length === 9);
+
+  // Framing-only run: no scrape/enrich/new clusters; frames the whole queue.
+  let scraped = false;
+  let enriched = false;
+  let frameCalls = 0;
+  const r1 = await runPipeline(env, db, {
+    scrape: async () => {
+      scraped = true;
+      return [];
+    },
+    frame: async () => {
+      frameCalls++;
+      return framing("framing-only");
+    },
+    enrich: async () => {
+      enriched = true;
+      return 0;
+    },
+    framingOnly: true,
+  });
+  check("framing-only: no scrape call", scraped === false);
+  check("framing-only: no enrich call", enriched === false);
+  check("framing-only: whole backlog framed", r1.framed === 9 && frameCalls === 9, JSON.stringify(r1));
+  check(
+    "framing-only: no new clusters or articles",
+    r1.clusters === 0 && r1.newArticles === 0 && r1.scraped === 0
+  );
+  check("framing-only: queue drained", (await db.clustersNeedingFraming(50)).length === 0);
+  check(
+    "framing-only: all 9 backlog framings persisted",
+    db.clusters.filter((c) => c.framing?.neutralSummary === "framing-only").length === 9
+  );
+  const runs = await db.latestPipelineRuns(5);
+  const foRun = runs.find((r) => r.framed === 9);
+  check(
+    "framing-only run logged with zero scrape counts",
+    !!foRun &&
+      foRun.scraped === 0 &&
+      foRun.clusters === 0 &&
+      foRun.newArticles === 0,
+    JSON.stringify(foRun)
+  );
+  check("lock released", db.lock === null);
+}
+
+console.log("== test: framing-only batch cap, idle probe, lock ==");
+{
+  const db = new MemoryDb();
+  const base = Date.now();
+  // Seed 20 unframed clusters directly (staggered seenAt, oldest first).
+  for (let i = 0; i < 20; i++) {
+    const k1 = `bbc-f${i}`;
+    const k2 = `cnn-f${i}`;
+    await db.insertArticles([
+      article(`f${i}`, `Framing seed story ${i}`, "bbc"),
+      article(`f${i}`, `Framing seed story ${i}`, "cnn"),
+    ]);
+    await db.createCluster(
+      `Framing seed ${i}`,
+      [k1, k2],
+      new Date(base + i * 1000),
+      `seed-sig-${i}`
+    );
+  }
+  check("20 unframed seeded", (await db.clustersNeedingFraming(50)).length === 20);
+
+  let frameCalls = 0;
+  const r1 = await runPipeline(env, db, {
+    frame: async () => {
+      frameCalls++;
+      return framing("capped");
+    },
+    framingOnly: true,
+  });
+  check("cap: exactly 14 framed in one run", r1.framed === 14 && frameCalls === 14, JSON.stringify(r1));
+  check(
+    "cap: oldest 14 framed first, newest 6 wait",
+    db.clusters.filter((c) => c.framing !== null).length === 14 &&
+      db.clusters[13]?.framing !== null &&
+      db.clusters[14]?.framing === null
+  );
+  check("6 left in queue", (await db.clustersNeedingFraming(50)).length === 6);
+
+  const r2 = await runPipeline(env, db, {
+    frame: async () => framing("capped"),
+    framingOnly: true,
+  });
+  check("second run frames the rest", r2.framed === 6 && r2.failed === 0, JSON.stringify(r2));
+  check("queue empty", (await db.clustersNeedingFraming(50)).length === 0);
+
+  // Idle probe: empty queue -> no run-log row, lock never touched.
+  const runsBefore = (await db.latestPipelineRuns(50)).length;
+  await db.acquirePipelineLock("held-by-other");
+  const idle = await runPipeline(env, db, {
+    frame: async () => framing("never called"),
+    framingOnly: true,
+  });
+  check("idle run returns zeros, no skip", idle.framed === 0 && idle.skipped === undefined, JSON.stringify(idle));
+  check("idle run records nothing", (await db.latestPipelineRuns(50)).length === runsBefore);
+  await db.releasePipelineLock("held-by-other");
+
+  // Lock held + backlog -> framing-only run reports skipped (shared lock path).
+  const db2 = new MemoryDb();
+  await db2.insertArticles([
+    article("a", "Locked story", "bbc"),
+    article("b", "Locked story", "cnn"),
+  ]);
+  await db2.createCluster("Locked", ["bbc-a", "cnn-b"], new Date(), "locked-sig");
+  await db2.acquirePipelineLock("other");
+  const skipped = await runPipeline(env, db2, {
+    frame: async () => framing("nope"),
+    framingOnly: true,
+  });
+  check("framing-only with lock held is skipped", skipped.skipped === true && skipped.framed === 0, JSON.stringify(skipped));
+  check("skipped run logged", (await db2.latestPipelineRuns(5))[0]?.skipped === 1);
+}
+
 console.log("\n=====================");
 console.log(`RESULTS: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

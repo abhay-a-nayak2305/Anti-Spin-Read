@@ -24,6 +24,13 @@ export const sources = [
 
 export const DEFAULT_CLUSTER_WINDOW_HOURS = 48;
 
+/**
+ * Schedule string for the framing-only cron trigger. The scheduled handler
+ * dispatches on this exact string (controller.cron), so it MUST match the
+ * second entry of the "crons" array in wrangler.jsonc.
+ */
+export const FRAMING_CRON_SCHEDULE = "7,22,37,52 * * * *";
+
 /** Worker bindings (wrangler vars, .dev.vars, or `wrangler secret put`) */
 export function workerConfig(env: Env) {
   return {

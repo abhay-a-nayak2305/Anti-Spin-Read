@@ -6,7 +6,7 @@ import type {
 } from "@cloudflare/workers-types";
 import { D1Db } from "./db.js";
 import { runPipeline } from "./pipeline.js";
-import { workerConfig, allowedOrigins } from "./config.js";
+import { workerConfig, allowedOrigins, FRAMING_CRON_SCHEDULE } from "./config.js";
 import { categorizeCluster } from "./categorize.js";
 import { isSafeHttpUrl } from "./images.js";
 import { createSlidingWindowLimiter } from "./rate-limit.js";
@@ -316,14 +316,19 @@ const app = createApp();
 
 export default {
   fetch: app.fetch,
-  // Runs the pipeline every 15 minutes (see [triggers] in wrangler.jsonc) —
-  // replaces the old GitHub Actions cron.
-  scheduled: async (_controller: ScheduledController, env: Env, _ctx: ExecutionContext) => {
+  // Two cron triggers (see [triggers] in wrangler.jsonc):
+  //   */15 * * * *       — full pipeline (scrape -> cluster -> frame)
+  //   FRAMING_CRON_SCHEDULE — framing-only: drains the unframed retry queue
+  //                        (up to FRAMING_ONLY_BATCH per run) without
+  //                        spending subrequests on RSS/enrichment, so the
+  //                        backlog never lingers. Idle when the queue is empty.
+  scheduled: async (controller: ScheduledController, env: Env, _ctx: ExecutionContext) => {
+    const framingOnly = controller.cron === FRAMING_CRON_SCHEDULE;
     try {
-      const result = await runPipeline(env, new D1Db(env.DB));
-      console.log(`[scheduled] pipeline: ${JSON.stringify(result)}`);
+      const result = await runPipeline(env, new D1Db(env.DB), { framingOnly });
+      console.log(`[scheduled]${framingOnly ? " framing-only" : ""} pipeline: ${JSON.stringify(result)}`);
     } catch (err) {
-      console.error("[scheduled] pipeline failed:", err);
+      console.error(`[scheduled]${framingOnly ? " framing-only" : ""} pipeline failed:`, err);
     }
   },
 } as ExportedHandler<Env>;

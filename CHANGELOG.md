@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Framing-only cron mode.** A second cron trigger (`7,22,37,52 * * * *`,
+  `FRAMING_CRON_SCHEDULE` in `backend/src/config.ts`) runs the pipeline
+  with scrape/dedup/enrich skipped and frames only the unframed retry
+  queue — up to 14 clusters per run (14 × 3 worst-case Gemini attempts =
+  42 subrequests < 50). The backlog that previously drained at 1–2
+  clusters per run now drains in minutes, and the queue stays
+  near-empty forever: no cluster can sit unframed for more than ~30
+  minutes, so every card reliably gets its full framing report. When the
+  queue is empty the run bails after a single read (before the lock) and
+  records nothing — an idle framing cron costs ~1 D1 read per run.
+
 ### Changed
 
 - **Every story card now shows an image.** Cards whose articles have no

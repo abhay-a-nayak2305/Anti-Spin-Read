@@ -4,7 +4,7 @@ import { frameCluster } from "./framing.js";
 import { enrichArticleImages } from "./images.js";
 import { workerConfig } from "./config.js";
 import type { Db } from "./db.js";
-import type { Env, IFraming, PipelineResult, PipelineRunRecord } from "./types.js";
+import type { Env, IFraming, PipelineResult, PipelineRunRecord, RawArticle } from "./types.js";
 import type { ClusteredArticle } from "./cluster.js";
 
 const FRAMING_CONCURRENCY = 3;
@@ -17,6 +17,10 @@ const RETRY_BATCH = 50;
 const ENRICH_BATCH = 8;
 const ENRICH_CATCHUP = 4;
 const FRAMING_BATCH = 3;
+// Framing-only cron mode: no RSS/enrichment subrequests run, so the whole
+// budget goes to Gemini. 14 clusters x 3 worst-case attempts (primary +
+// 2 fallback models) = 42 subrequests < 50, leaving >=8 headroom.
+const FRAMING_ONLY_BATCH = 14;
 const RETENTION_DAYS = 14;
 const RUNS_RETENTION_DAYS = 90; // pipeline_runs log is bound separately
 const MAINTENANCE_INTERVAL_MS = 24 * 3600_000;
@@ -56,6 +60,9 @@ interface PipelineDeps {
   scrape?: typeof scrapeAll;
   frame?: FrameFn;
   enrich?: typeof enrichArticleImages;
+  /** Framing-only mode (framing cron): skip scrape/dedup/enrich and frame
+   *  only the retry queue, up to FRAMING_ONLY_BATCH per run. */
+  framingOnly?: boolean;
 }
 
 interface PendingFraming {
@@ -101,6 +108,17 @@ export async function runPipeline(
   const scrape = deps.scrape ?? scrapeAll;
   const frame = deps.frame ?? frameCluster;
   const enrich = deps.enrich ?? enrichArticleImages;
+  const framingOnly = deps.framingOnly === true;
+
+  // Framing-only mode: cheap idle probe BEFORE taking the lock — an empty
+  // queue costs one read and skips the lock and run-log writes entirely.
+  if (framingOnly) {
+    const probe = await db.clustersNeedingFraming(1);
+    if (probe.length === 0) {
+      console.log("[pipeline] framing-only: queue empty, idle");
+      return { scraped: 0, newArticles: 0, clusters: 0, framed: 0, failed: 0 };
+    }
+  }
 
   const lockToken = crypto.randomUUID();
   if (!(await db.acquirePipelineLock(lockToken))) {
@@ -121,61 +139,70 @@ export async function runPipeline(
   const startedAt = new Date();
   try {
     const cfg = workerConfig(env);
-    const raw = await scrape(cfg.clusterWindowHours);
+    let raw: RawArticle[] = [];
+    let newArticles: RawArticle[] = [];
+    let clusters: ClusteredArticle[][] = [];
+    let enriched = 0;
 
-    // 1. Insert only articles we haven't seen; returns the new ones
-    const newArticles = await db.insertArticles(raw.filter((a) => a.url));
-    console.log(`[pipeline] ${newArticles.length} new of ${raw.length} scraped`);
+    if (!framingOnly) {
+      raw = await scrape(cfg.clusterWindowHours);
 
-    // 2. Cluster the new articles AGAINST the recent unclustered pool.
-    //    Direct RSS feeds only surface each outlet's latest items, so the
-    //    second outlet covering a story often arrives runs — or hours —
-    //    after the first. Clustering only same-run articles would leave
-    //    those stories invisible forever; matching against the pool (48h
-    //    window, not yet referenced by any cluster) catches them. Once a
-    //    cluster is created its articles leave the pool, so re-runs can't
-    //    re-create it (sig uniqueness + the EXISTS guard below).
-    const poolArticles = [
-      ...newArticles,
-      ...(await db.recentUnclusteredArticles(
-        new Date(Date.now() - cfg.clusterWindowHours * 3600_000),
-        2000
-      )),
-    ];
-    // The pool is ~10x bigger than a single run's batch, and the greedy
-    // pass scans newest→oldest, so the temporal window must widen to reach
-    // stories whose outlets published hours apart. 128 clusters ≈ ~9h of
-    // news at current volume — still cheap (token-set Jaccards; the
-    // threshold + rare-token boost keep unrelated stories out). Defaults
-    // in cluster.ts stay at 8 for the eval corpus.
-    const clusters = clusterArticles(poolArticles, { clusterWindow: 128 });
+      // 1. Insert only articles we haven't seen; returns the new ones
+      newArticles = await db.insertArticles(raw.filter((a) => a.url));
+      console.log(`[pipeline] ${newArticles.length} new of ${raw.length} scraped`);
 
-    // 2b. Enrich new-cluster articles with og:image URLs (best-effort,
-    // only articles without an image yet; failures retry next run).
-    // Capped at ENRICH_BATCH per run: a pool burst can surface 40+ clusters
-    // at once, and each og:image fetch is a subrequest against the 50-per-
-    // invocation budget. Uncapped articles are retried next run.
-    const toEnrich = [...new Set(clusters.flat())].slice(0, ENRICH_BATCH);
-    const enriched = await enrich(db, toEnrich);
+      // 2. Cluster the new articles AGAINST the recent unclustered pool.
+      //    Direct RSS feeds only surface each outlet's latest items, so the
+      //    second outlet covering a story often arrives runs — or hours —
+      //    after the first. Clustering only same-run articles would leave
+      //    those stories invisible forever; matching against the pool (48h
+      //    window, not yet referenced by any cluster) catches them. Once a
+      //    cluster is created its articles leave the pool, so re-runs can't
+      //    re-create it (sig uniqueness + the EXISTS guard below).
+      const poolArticles = [
+        ...newArticles,
+        ...(await db.recentUnclusteredArticles(
+          new Date(Date.now() - cfg.clusterWindowHours * 3600_000),
+          2000
+        )),
+      ];
+      // The pool is ~10x bigger than a single run's batch, and the greedy
+      // pass scans newest→oldest, so the temporal window must widen to reach
+      // stories whose outlets published hours apart. 128 clusters ≈ ~9h of
+      // news at current volume — still cheap (token-set Jaccards; the
+      // threshold + rare-token boost keep unrelated stories out). Defaults
+      // in cluster.ts stay at 8 for the eval corpus.
+      clusters = clusterArticles(poolArticles, { clusterWindow: 128 });
 
-    // 2c. Enrichment catch-up: older clusters' articles that still lack an
-    // image (formed before enrichment existed, or publishers that blocked
-    // the first attempt). Bounded to the subrequest budget.
-    await enrich(db, await db.articlesInClustersMissingImages(ENRICH_CATCHUP));
+      // 2b. Enrich new-cluster articles with og:image URLs (best-effort,
+      // only articles without an image yet; failures retry next run).
+      // Capped at ENRICH_BATCH per run: a pool burst can surface 40+ clusters
+      // at once, and each og:image fetch is a subrequest against the 50-per-
+      // invocation budget. Uncapped articles are retried next run.
+      const toEnrich = [...new Set(clusters.flat())].slice(0, ENRICH_BATCH);
+      enriched = await enrich(db, toEnrich);
+
+      // 2c. Enrichment catch-up: older clusters' articles that still lack an
+      // image (formed before enrichment existed, or publishers that blocked
+      // the first attempt). Bounded to the subrequest budget.
+      await enrich(db, await db.articlesInClustersMissingImages(ENRICH_CATCHUP));
+    }
 
     // 3. Collect clusters that still need framing: new ones first (create
     // the row now so re-runs don't reframe them), then previously failed
     // ones from the retry queue (framing IS NULL, oldest first).
     const pending: PendingFraming[] = [];
 
-    for (const cluster of clusters) {
-      if (cluster.length < 2) continue;
-      const keys = cluster.map((a) => a.dedupKey);
-      if (await db.clusterExistsWithFraming(keys)) continue;
-      const phrase = cluster.map((a) => a.title).sort((x, y) => x.length - y.length)[0];
-      const sig = clusterSig(keys);
-      const id = await db.createCluster(phrase.slice(0, 300), keys, new Date(), sig);
-      pending.push({ id, keyPhrase: phrase, sig, cluster });
+    if (!framingOnly) {
+      for (const cluster of clusters) {
+        if (cluster.length < 2) continue;
+        const keys = cluster.map((a) => a.dedupKey);
+        if (await db.clusterExistsWithFraming(keys)) continue;
+        const phrase = cluster.map((a) => a.title).sort((x, y) => x.length - y.length)[0];
+        const sig = clusterSig(keys);
+        const id = await db.createCluster(phrase.slice(0, 300), keys, new Date(), sig);
+        pending.push({ id, keyPhrase: phrase, sig, cluster });
+      }
     }
 
     const pendingSigs = new Set(pending.map((p) => p.sig));
@@ -191,12 +218,17 @@ export async function runPipeline(
     }
 
     // 4. Frame with bounded concurrency; a failure only marks that cluster.
-    //    FRAMING_BATCH caps clusters per run (new first) so the burst
-    //    doesn't exhaust the subrequest budget; the rest stay in the retry
-    //    queue and get framed over the next runs.
+    //    Normal runs cap at FRAMING_BATCH (new first) so the burst doesn't
+    //    exhaust the 50-subrequest budget; the rest stay in the retry queue
+    //    and get framed over the next runs. Framing-only runs (the framing
+    //    cron) skip scrape/enrich, so the whole budget goes to Gemini:
+    //    FRAMING_ONLY_BATCH x 3 worst-case attempts = 42 < 50.
     let framed = 0;
     let failed = 0;
-    const framingQueue = pending.slice(0, FRAMING_BATCH);
+    const framingQueue = pending.slice(
+      0,
+      framingOnly ? FRAMING_ONLY_BATCH : FRAMING_BATCH
+    );
     await pool(framingQueue, FRAMING_CONCURRENCY, async (p) => {
       try {
         const framing = await frame(p.cluster, {
@@ -216,7 +248,7 @@ export async function runPipeline(
     });
 
     console.log(
-      `[pipeline] done: ${clusters.length} clusters, ${framed} framed, ${failed} failed, ${enriched} images`
+      `[pipeline]${framingOnly ? " framing-only" : ""} done: ${clusters.length} clusters, ${framed} framed, ${failed} failed, ${enriched} images`
     );
 
     // 5. Maintenance (retention purge) — at most once per 24h.
