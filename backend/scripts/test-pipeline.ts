@@ -448,6 +448,24 @@ console.log("== test: framing-only batch cap, idle probe, lock ==");
   check("skipped run logged", (await db2.latestPipelineRuns(5))[0]?.skipped === 1);
 }
 
+console.log("== test: watchdog aborts stuck runs and releases the lock ==");
+{
+  const db = new MemoryDb();
+  // scrape never resolves -> the watchdog must win the race, record the
+  // stuck stage, release the lock, and return zeros.
+  const result = await runPipeline(env, db, {
+    scrape: () => new Promise<RawArticle[]>(() => {}), // hangs forever
+    frame: async () => framing("never called"),
+    enrich: async () => 0,
+    watchdogMs: 30,
+  });
+  check("watchdog returns zeros", result.scraped === 0 && result.newArticles === 0 && result.clusters === 0, JSON.stringify(result));
+  check("lock released after watchdog", db.lock === null);
+  const runs = await db.latestPipelineRuns(5);
+  check("watchdog run logged with error", runs[0]?.error?.includes('stuck in stage "scrape"') === true, JSON.stringify(runs[0]));
+  check("watchdog run not marked skipped", runs[0]?.skipped === 0);
+}
+
 console.log("\n=====================");
 console.log(`RESULTS: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

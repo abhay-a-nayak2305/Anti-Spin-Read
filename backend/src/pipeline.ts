@@ -21,6 +21,13 @@ const FRAMING_BATCH = 3;
 // budget goes to Gemini. 14 clusters x 3 worst-case attempts (primary +
 // 2 fallback models) = 42 subrequests < 50, leaving >=8 headroom.
 const FRAMING_ONLY_BATCH = 14;
+// A run must never hold the pipeline lock for its full 30-minute lease or
+// leave a platform zombie: the watchdog aborts the run after this long and
+// records which stage it was stuck in ("stuck in stage X"). Worst-case
+// healthy runs: normal ~8 min (scrape 36 fetches x 15s worst / 4 concurrent,
+// enrich, framing), framing-only ~11.25 min (14 x 3 attempts x 45s / 3
+// concurrent) — 12 min is the safe ceiling.
+const WATCHDOG_MS = 12 * 60_000;
 const RETENTION_DAYS = 14;
 const RUNS_RETENTION_DAYS = 90; // pipeline_runs log is bound separately
 const MAINTENANCE_INTERVAL_MS = 24 * 3600_000;
@@ -63,6 +70,8 @@ interface PipelineDeps {
   /** Framing-only mode (framing cron): skip scrape/dedup/enrich and frame
    *  only the retry queue, up to FRAMING_ONLY_BATCH per run. */
   framingOnly?: boolean;
+  /** Watchdog override for tests (defaults to WATCHDOG_MS). */
+  watchdogMs?: number;
 }
 
 interface PendingFraming {
@@ -137,7 +146,24 @@ export async function runPipeline(
   }
 
   const startedAt = new Date();
-  try {
+  // Watchdog: the body below races a timer. If the timer wins, the run
+  // records "stuck in stage X" (the stage variable pinpoints the hang) and
+  // the finally-block releases the lock, so the next cron recovers even if
+  // an outbound call never settles. The abandoned body keeps running in the
+  // background but its outcome is discarded (race already settled) and its
+  // lock release is a token-mismatched no-op.
+  let stage = "starting";
+  let watchdogFired = false;
+  const watchdogMs = deps.watchdogMs ?? WATCHDOG_MS;
+  let watchdogTimer: ReturnType<typeof setTimeout> | undefined;
+  const watchdogPromise = new Promise<undefined>((resolve) => {
+    watchdogTimer = setTimeout(() => {
+      watchdogFired = true;
+      resolve(undefined);
+    }, watchdogMs);
+  });
+
+  const bodyPromise = (async (): Promise<PipelineResult> => {
     const cfg = workerConfig(env);
     let raw: RawArticle[] = [];
     let newArticles: RawArticle[] = [];
@@ -145,9 +171,11 @@ export async function runPipeline(
     let enriched = 0;
 
     if (!framingOnly) {
+      stage = "scrape";
       raw = await scrape(cfg.clusterWindowHours);
 
       // 1. Insert only articles we haven't seen; returns the new ones
+      stage = "insert-articles";
       newArticles = await db.insertArticles(raw.filter((a) => a.url));
       console.log(`[pipeline] ${newArticles.length} new of ${raw.length} scraped`);
 
@@ -159,6 +187,7 @@ export async function runPipeline(
       //    window, not yet referenced by any cluster) catches them. Once a
       //    cluster is created its articles leave the pool, so re-runs can't
       //    re-create it (sig uniqueness + the EXISTS guard below).
+      stage = "cluster";
       const poolArticles = [
         ...newArticles,
         ...(await db.recentUnclusteredArticles(
@@ -179,6 +208,7 @@ export async function runPipeline(
       // Capped at ENRICH_BATCH per run: a pool burst can surface 40+ clusters
       // at once, and each og:image fetch is a subrequest against the 50-per-
       // invocation budget. Uncapped articles are retried next run.
+      stage = "enrich";
       const toEnrich = [...new Set(clusters.flat())].slice(0, ENRICH_BATCH);
       enriched = await enrich(db, toEnrich);
 
@@ -191,6 +221,7 @@ export async function runPipeline(
     // 3. Collect clusters that still need framing: new ones first (create
     // the row now so re-runs don't reframe them), then previously failed
     // ones from the retry queue (framing IS NULL, oldest first).
+    stage = "queue-clusters";
     const pending: PendingFraming[] = [];
 
     if (!framingOnly) {
@@ -223,6 +254,7 @@ export async function runPipeline(
     //    and get framed over the next runs. Framing-only runs (the framing
     //    cron) skip scrape/enrich, so the whole budget goes to Gemini:
     //    FRAMING_ONLY_BATCH x 3 worst-case attempts = 42 < 50.
+    stage = "frame";
     let framed = 0;
     let failed = 0;
     const framingQueue = pending.slice(
@@ -252,23 +284,13 @@ export async function runPipeline(
     );
 
     // 5. Maintenance (retention purge) — at most once per 24h.
+    stage = "maintain";
     const purged = await runMaintenance(db);
     if (purged) {
       console.log(
         `[pipeline] maintenance: purged ${purged.clusters} clusters, ${purged.articles} orphan articles, ${purged.runs} run log rows`
       );
     }
-
-    await recordRun(db, {
-      startedAt,
-      finishedAt: new Date(),
-      scraped: raw.length,
-      newArticles: newArticles.length,
-      clusters: clusters.length,
-      framed,
-      failed,
-      skipped: 0,
-    });
 
     return {
       scraped: raw.length,
@@ -277,6 +299,42 @@ export async function runPipeline(
       framed,
       failed,
     };
+  })();
+
+  try {
+    // The watchdog branch above returns before `outcome` is used, so the
+    // race's `undefined` arm can never reach here.
+    const outcome = (await Promise.race([
+      bodyPromise,
+      watchdogPromise,
+    ])) as PipelineResult;
+    if (watchdogFired) {
+      const message = `pipeline watchdog: stuck in stage "${stage}" for ${Math.round(watchdogMs / 60000)} min`;
+      console.error(`[pipeline] ${message}`);
+      await recordRun(db, {
+        startedAt,
+        finishedAt: new Date(),
+        scraped: 0,
+        newArticles: 0,
+        clusters: 0,
+        framed: 0,
+        failed: 0,
+        skipped: 0,
+        error: message,
+      });
+      return { scraped: 0, newArticles: 0, clusters: 0, framed: 0, failed: 0 };
+    }
+    await recordRun(db, {
+      startedAt,
+      finishedAt: new Date(),
+      scraped: outcome.scraped,
+      newArticles: outcome.newArticles,
+      clusters: outcome.clusters,
+      framed: outcome.framed,
+      failed: outcome.failed,
+      skipped: 0,
+    });
+    return outcome;
   } catch (err) {
     // Event log records failures too — the run stays visible to ops even
     // when an exception escapes the pipeline body.
@@ -293,6 +351,9 @@ export async function runPipeline(
     });
     throw err;
   } finally {
+    // The watchdog timer must not keep the isolate/process alive after the
+    // race settled (clearing after it fired is a harmless no-op).
+    if (watchdogTimer) clearTimeout(watchdogTimer);
     await db.releasePipelineLock(lockToken);
   }
 }
