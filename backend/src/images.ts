@@ -204,11 +204,23 @@ export function isSafeHttpUrl(url: string): boolean {
 }
 
 /**
+ * CDN hosts that reject requests from the Workers origin (401/403 with no
+ * referer/origin match). Storing their URLs is pointless — the browser will
+ * never load them. Expensive og:image fetches for these hosts are skipped.
+ */
+const BLOCKED_IMAGE_HOSTS = new Set([
+  "i.guim.co.uk", // Guardian: 401 "missing signature" — requires signed URL
+]);
+
+/**
  * Extract the og:image URL from raw HTML. Tolerates property/name in either
  * order relative to content, single/double quotes, protocol-relative URLs,
  * and HTML-encoded ampersands (`&amp;` → `&` — publishers routinely encode
  * the `&` in `?w=900&amp;h=500` query strings; a raw `&amp;` in a stored
  * URL corrupts the parameters).
+ *
+ * Also rejects obviously truncated URLs (some publisher meta attributes
+ * contain malformed content values that end mid-filename).
  */
 export function extractOgImage(html: string): string {
   const re =
@@ -220,6 +232,18 @@ export function extractOgImage(html: string): string {
   let url = decodeEntities(raw.trim());
   // Protocol-relative: //img.example/x.png -> https://img.example/x.png
   if (url.startsWith("//")) url = `https:${url}`;
+
+  // Reject known-blocked CDNs and obviously truncated URLs.
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (BLOCKED_IMAGE_HOSTS.has(host)) return "";
+  } catch {
+    return "";
+  }
+  if (url.length > 1000) return ""; // sanity cap — real og:image URLs are < 500 chars
+  if (/[_.]$/.test(url)) return ""; // ends with _ or . — likely truncated mid-filename
+  if (/%$/.test(url)) return ""; // ends with % — truncated percent-encoding
+
   return isSafeHttpUrl(url) ? url : "";
 }
 
@@ -306,11 +330,16 @@ export async function fetchOgImage(
           })
           .transform(res);
         await readCappedText(transformed.body); // drain stream so the request completes
-        const og = decodeEntities(found.trim());
-        if (!og) return "";
-        // Protocol-relative: //img.example/x.png -> https://img.example/x.png
-        const candidate = og.startsWith("//") ? `https:${og}` : og;
-        return isSafeHttpUrl(candidate) ? candidate : "";
+const og = decodeEntities(found.trim());
+if (!og) return "";
+// Protocol-relative: //img.example/x.png -> https://img.example/x.png
+const candidate = og.startsWith("//") ? `https:${og}` : og;
+try {
+  if (BLOCKED_IMAGE_HOSTS.has(new URL(candidate).hostname.toLowerCase())) return "";
+} catch {
+  return "";
+}
+return isSafeHttpUrl(candidate) ? candidate : "";
       }
 
       const html = await readCappedText(res.body);
