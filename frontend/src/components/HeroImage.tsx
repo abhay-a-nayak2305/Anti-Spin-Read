@@ -20,10 +20,13 @@ import { LetterBadge } from "./LetterBadge";
 export function HeroImage({
   src,
   site,
+  categoryColor,
   eager = false,
 }: {
   src: string;
   site: string;
+  /** Optional category color CSS var (e.g. "var(--color-cat-politics)") for the monogram fallback. */
+  categoryColor?: string;
   /** Above-the-fold heroes (first card) may load eagerly; everything else lazy. */
   eager?: boolean;
 }) {
@@ -33,10 +36,14 @@ export function HeroImage({
   return (
     <div className="relative aspect-video overflow-hidden bg-ink">
       {(!src || broken) && (
-        <div className="absolute inset-0 no-img opacity-30" aria-hidden />
+        <div
+          className="absolute inset-0 no-img opacity-30"
+          style={{ "--color-badge": categoryColor } as React.CSSProperties}
+          aria-hidden
+        />
       )}
       {exhausted ? (
-        <LetterBadge site={site} className="h-full w-full" />
+        <LetterBadge site={site} className="h-full w-full" color={categoryColor} />
       ) : (
         <img
           src={src}

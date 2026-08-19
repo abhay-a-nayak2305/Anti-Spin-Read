@@ -46,7 +46,7 @@ export function StoryCard({
         className="block w-full border-b-2 border-ink text-left group"
       >
         <div className="relative">
-          <HeroImage src={hero?.imageUrl ?? ""} site={hero?.url ?? ""} eager={eager} />
+          <HeroImage src={hero?.imageUrl ?? ""} site={hero?.url ?? ""} categoryColor={meta.selection} eager={eager} />
           <span className="absolute top-2 right-2 border-2 border-ink bg-ink px-1.5 py-0.5 font-display text-[10px] uppercase text-paper opacity-0 transition-opacity group-hover:opacity-100">
             Read →
           </span>

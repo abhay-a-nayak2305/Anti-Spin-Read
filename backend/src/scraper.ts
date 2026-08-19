@@ -16,6 +16,40 @@ function googleNewsFeedUrl(site: string, hours: number): string {
   return `https://news.google.com/rss/search?q=${q}&hl=en-US&gl=US&ceid=US:en`;
 }
 
+const MAX_URL_REDIRECTS = 2;
+
+/**
+ * Resolve a Google News redirect URL (news.google.com/rss/articles/…) to
+ * the actual article URL by following the Location header chain. Returns
+ * the final URL, or the original URL if it doesn't redirect.
+ */
+async function resolveGoogleNewsUrl(url: string): Promise<string> {
+  if (!url.includes("news.google.com/rss/articles/")) return url;
+  let current = url;
+  for (let hop = 0; hop <= MAX_URL_REDIRECTS; hop++) {
+    try {
+      const res = await fetch(current, {
+        redirect: "manual",
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        },
+      });
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get("location");
+        if (!location || hop === MAX_URL_REDIRECTS) return url;
+        current = new URL(location, current).toString();
+        continue;
+      }
+      // Not a redirect — return whatever URL we ended up at
+      return res.url || current;
+    } catch {
+      return url;
+    }
+  }
+  return url;
+}
+
 export function hashText(input: string): string {
   // FNV-1a — deterministic 32-bit hash, fine for dedup keys
   let h = 0x811c9dc5;
@@ -315,11 +349,18 @@ async function scrapeSource(
     const rawContent = item.content ?? item.contentSnippet ?? "";
     const rawLede = stripHtml(rawContent);
     const lede = stripOutletSuffix(rawLede, label);
+    const rawUrl = item.link ?? "";
+    // Google News RSS items carry redirect URLs (news.google.com/rss/articles/…)
+    // that don't resolve to the article's og:image. Resolve them to the actual
+    // article URL before storing so enrichment can fetch the right page.
+    const resolvedUrl = rawUrl.includes("news.google.com/rss/articles/")
+      ? await resolveGoogleNewsUrl(rawUrl)
+      : rawUrl;
     articles.push({
       dedupKey: `${label}|${hashText(normalized)}`,
       source: label,
       title: cleanTitle,
-      url: item.link ?? "",
+      url: resolvedUrl,
       lede,
       publishedAt,
       // Feed-carried image when the feed provides one (Google News

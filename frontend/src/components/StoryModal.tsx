@@ -206,7 +206,7 @@ export function StoryModal({
         <div className="px-5 pb-6">
           {hero?.imageUrl && (
             <figure className="mt-5 border-2 border-ink">
-              <HeroImage src={hero.imageUrl} site={hero.url} />
+              <HeroImage src={hero.imageUrl} site={hero.url} categoryColor={meta.selection} />
               <figcaption className="flex items-center justify-between gap-2 bg-ink px-2 py-1.5 text-[10px] uppercase tracking-widest text-paper">
                 <span className="truncate">
                   IMG: {hero.source} — {hero.title}

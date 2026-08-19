@@ -10,10 +10,14 @@ import { siteInitial } from "../types";
 export function LetterBadge({
   site,
   className = "",
+  color,
 }: {
   site: string;
   className?: string;
+  /** Optional category color CSS var; falls back to acid when omitted. */
+  color?: string;
 }) {
+  const fill = color ?? "var(--color-acid)";
   return (
     <svg
       viewBox="0 0 100 100"
@@ -31,7 +35,7 @@ export function LetterBadge({
         dominantBaseline="central"
         fontFamily="'Archivo Black', 'Arial Black', system-ui, sans-serif"
         fontSize="56"
-        fill="var(--color-acid)"
+        fill={fill}
       >
         {siteInitial(site)}
       </text>

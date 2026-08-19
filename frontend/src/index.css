@@ -114,8 +114,8 @@
   .no-img {
     background: repeating-linear-gradient(
       -45deg,
-      var(--color-acid),
-      var(--color-acid) 12px,
+      var(--color-badge, var(--color-acid)),
+      var(--color-badge, var(--color-acid)) 12px,
       var(--color-ink) 12px,
       var(--color-ink) 24px
     );
