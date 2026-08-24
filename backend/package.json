@@ -26,14 +26,14 @@
     "rss-parser": "^3.13.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260811.1",
+    "@cloudflare/workers-types": "^5.20260821.1",
     "@hono/node-server": "^1.13.7",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.10.5",
     "better-sqlite3": "^13.0.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.125.0"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
